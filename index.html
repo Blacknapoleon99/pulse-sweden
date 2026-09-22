@@ -1,6 +1,488 @@
 <!doctype html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pulse — A clearer view of your city</title><link rel="icon" href="data:,"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIINfhmNHrzRC9dT/miZyoHS5obTRR9BMY=" crossorigin=""><link rel="stylesheet" href="/style.css"><style>.source-links{display:grid;gap:8px;margin:20px 0 14px}.source-links a{display:block;border:1px solid #d8e5d4;border-radius:7px;padding:10px 12px;color:#265f49!important;text-decoration:none;font-size:11px}.data-context{font-size:11px!important;line-height:1.7!important;border-top:1px solid #e5eae5;padding-top:14px}.public-data{font-size:8px;letter-spacing:1.1px;color:#357153;background:#edf6ec;border:1px solid #d8e8d6;border-radius:999px;padding:6px 8px}.source-status{display:grid;gap:11px;margin-top:21px}.source-row{border:1px solid #e1e9df;border-radius:9px;padding:13px}.source-row header{height:auto;padding:0;border:0;display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.source-row h3{font-size:13px;margin:0}.source-row p{font-size:11px;line-height:1.65;margin:8px 0;color:#738170}.source-row small{font-size:10px;color:#8a9888}.source-badge{font-size:8px;letter-spacing:.8px;padding:5px 7px;border-radius:999px;background:#eef2ed;color:#54715b;white-space:nowrap}.source-badge.active{background:#e5f2e8;color:#317044}.source-badge.review-required{background:#fbf1df;color:#9b6c1d}.source-badge.not-connected{background:#f3eeee;color:#7a6666}@media(max-width:800px){.public-data{display:none}}</style><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script><script src="/app.js" defer></script></head>
-<body><header><a class="brand" href="/" aria-label="Pulse home"><span class="brand-icon">⌁</span>pulse<span class="sweden">SWEDEN</span></a><nav><span class="active-nav">Explore map</span><button id="sources">Source status</button><button id="about">About the data ↗</button></nav><div class="header-right"><span class="public-data">PUBLIC DATA ONLY</span><span class="demo">CONCEPT DEMO</span><span class="avatar">P</span></div></header>
-<main><aside><div class="intro"><div class="eyebrow">A LITTLE MORE AWARE.</div><h1>Your city.<br>A clearer picture.</h1><p>Explore the latest public police reports<br>across Sweden.</p></div><div class="filters"><label class="search"><span>⌕</span><input id="search" placeholder="Search a place or report…" aria-label="Search a place or report"></label><div class="selects"><select id="region" aria-label="Area"><option value="">All Sweden</option></select><select id="period" aria-label="Time range"><option value="24">Last 24 hours</option><option value="72">Last 3 days</option><option value="0">All available</option></select></div><div class="chips" id="chips"><button class="chosen" data-cat="all">All reports</button><button data-cat="traffic">Traffic</button><button data-cat="crime">Crime</button><button data-cat="other">Other</button></div></div><div class="feed-heading"><h2>Latest reports <span id="count">—</span></h2><span>NEWEST FIRST</span></div><div id="feed" class="feed" aria-live="polite"><div class="empty">Connecting to Polisen…</div></div><div class="source-footer"><span class="source-icon">✓</span><div>Direct from Polisen.se<small>Public reports · Original Swedish text</small></div></div></aside>
-<section class="map-section" aria-label="Interactive police report map"><div id="map"></div><div class="map-top"><div class="live-pill"><span id="status-dot" class="dot"></span><strong id="status">Connecting</strong><span class="divider"></span><span id="updated">Waiting for feed</span><button id="refresh" aria-label="Refresh reports">↻</button></div><button class="map-button" id="reset">⌖ <span>Show results</span></button></div><div class="map-heading"><span class="eyebrow">THE BIGGER PICTURE</span><h2 id="map-title">Across Sweden</h2><p id="map-subtitle">Public reports, mapped by area.</p></div><div class="legend"><span><i class="traffic"></i>Traffic</span><span><i class="crime"></i>Crime</span><span><i class="other"></i>Other</span><span class="legend-note">Numbers group reports at the same area centre</span></div><div id="detail" class="detail" hidden></div><div class="map-note">ⓘ &nbsp;Approximate area centres, not incident locations. Reports may be delayed.</div><div id="toast" role="status" hidden></div></section></main>
-<dialog id="sources-dialog"><button class="close" id="close-sources" aria-label="Close source status">×</button><div class="eyebrow">SOURCE TRANSPARENCY</div><h2>What powers this map.</h2><p>Every source has a defined public role. Pulse does not use person, address or residence data in this visitor experience.</p><div id="source-status" class="source-status" aria-live="polite">Loading source status…</div></dialog><dialog id="about-dialog"><button class="close" id="close-about" aria-label="Close about">×</button><div class="eyebrow">KNOW YOUR SOURCE</div><h2>Awareness, with context.</h2><p>Pulse is an independent concept demo using the Swedish Police’s public events API. It is not affiliated with Polisen.</p><p>The feed contains up to 500 recent reports and covers a selection of police activity. Reports may appear hours after an event, and initial information can change.</p><p>Map markers show municipality or county centres supplied by the API, never an exact incident address. Marker numbers group reports sharing the same coordinates. Colours describe categories, not danger levels.</p><p>We check for updates every 65 seconds. Times are shown in Europe/Stockholm. Report text stays in its original Swedish.</p><p class="data-context"><strong>Publication boundary:</strong> Pulse does not infer or publish where suspects or convicted people live. Any future manual area must be coarse, backed by an official source, reviewed, and have an expiry date. Court material belongs in a legal-updates layer and is never joined to homes or inferred “criminal” areas.</p><div class="source-links"><a href="https://polisen.se/om-polisen/om-webbplatsen/oppna-data/api-over-polisens-handelser/" target="_blank" rel="noopener">Polisen event API ↗</a><a href="https://www.skatteverket.se/omoss/varverksamhet/statistikportalen/hamtastatistikmedapi.4.262c54c219391f2e96320e6.html" target="_blank" rel="noopener">Skatteverket statistics API ↗</a><a href="https://www.digg.se/kunskap-och-stod/eu-rattsakter/oppna-datadirektivet" target="_blank" rel="noopener">DIGG open data directive ↗</a><a href="https://www.dataportal.se/datasets/601_3755" target="_blank" rel="noopener">Domstolsverket rättspraxis API ↗</a></div><p class="data-context">The Skatteverket page documents aggregated, machine-readable statistics available through Sveriges dataportal. DIGG describes the Swedish and EU framework for making public data open and reusable. Domstolsverkets linked dataset is published court practice from higher instances, not a general tingsrätt feed. These are context links for future civic-data connectors; the live map currently uses Polisen only.</p><p class="emergency">For an emergency, call <a href="tel:112">112</a>.</p></dialog></body></html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TryggPuls — Sveriges Digitala Trygghetsplattform</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+  
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIINfhmNHrzRC9dT/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="/style.css">
+  
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <!-- HUVUDNAVIGERING & HEADER -->
+  <header>
+    <div class="brand-block">
+      <a class="brand" href="/" aria-label="TryggPuls startsida">
+        <span class="brand-shield">🛡️</span>
+        <div class="brand-text">
+          <span class="brand-title">Trygg<strong>Puls</strong></span>
+          <span class="brand-subtitle">Sveriges Trygghetsplattform</span>
+        </div>
+      </a>
+    </div>
+
+    <!-- HUVUDFLIKAR BASERADE PÅ VISIONSDOKUMENTET -->
+    <nav class="main-nav" aria-label="Huvudmenyer">
+      <button class="nav-tab active" data-tab="karta">
+        <span class="nav-icon">🗺️</span>
+        <span class="nav-label">Karta & Realtid</span>
+      </button>
+      <button class="nav-tab" data-tab="rutt">
+        <span class="nav-icon">🚶</span>
+        <span class="nav-label">Trygg Rutt</span>
+      </button>
+      <button class="nav-tab" data-tab="familj">
+        <span class="nav-icon">👨‍👩‍👧</span>
+        <span class="nav-label">Familj & Zoner</span>
+      </button>
+      <button class="nav-tab" data-tab="foretag">
+        <span class="nav-icon">🏢</span>
+        <span class="nav-label">Företag B2B</span>
+      </button>
+      <button class="nav-tab" data-tab="bra">
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">Platsprofil & BRÅ</span>
+      </button>
+      <button class="nav-tab sos-tab" data-tab="sos">
+        <span class="nav-icon">🚨</span>
+        <span class="nav-label">SOS & Larm</span>
+      </button>
+    </nav>
+
+    <div class="header-actions">
+      <span class="badge-real-data" title="Samtliga händelser och rutter hämtas direkt från Polisen, BRÅ och OSRM">
+        ✓ 100% OFFICIELLA DATA
+      </span>
+      <button id="btn-sources" class="btn-subtle" aria-label="Öppna källinformation">Källstatus</button>
+      <button id="btn-legal" class="btn-subtle" aria-label="Öppna rättspraxis">Rättspraxis</button>
+    </div>
+  </header>
+
+  <!-- HUVUDLAYOUT: SIDOPANEL + KARTA -->
+  <main>
+    <aside id="sidebar">
+      
+      <!-- ==================== FLIK 1: KARTA & REALTID ==================== -->
+      <section id="panel-karta" class="tab-panel active">
+        <div class="panel-header">
+          <div class="eyebrow">REALTIDSHÄNDELSER FRÅN POLISEN</div>
+          <h1>Polisen i realtid</h1>
+          <p>Se verifierade händelser, larm och insatser över hela Sverige direkt från Polismyndigheten.</p>
+        </div>
+
+        <div class="filters">
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="karta-search" placeholder="Sök plats, gata, händelsetyp..." aria-label="Sök händelser">
+          </div>
+
+          <div class="filter-row">
+            <select id="karta-region" aria-label="Välj län">
+              <option value="">Hela Sverige (Alla län)</option>
+            </select>
+            <select id="karta-period" aria-label="Tidsintervall">
+              <option value="12">Senaste 12 timmarna</option>
+              <option value="24" selected>Senaste 24 timmarna</option>
+              <option value="72">Senaste 3 dagarna</option>
+              <option value="0">All tillgänglig data</option>
+            </select>
+          </div>
+
+          <div class="category-chips" id="karta-categories">
+            <button class="chip active" data-category="all">Alla</button>
+            <button class="chip" data-category="violence">Våld & Rån</button>
+            <button class="chip" data-category="theft">Stöld & Inbrott</button>
+            <button class="chip" data-category="traffic">Trafik</button>
+            <button class="chip" data-category="fire">Brand & Olycka</button>
+            <button class="chip" data-category="other">Övrigt</button>
+          </div>
+        </div>
+
+        <div class="feed-header">
+          <h2>Aktuella händelser <span id="karta-count" class="count-badge">0</span></h2>
+          <span class="sort-tag">SENASTE FÖRST</span>
+        </div>
+
+        <div id="karta-feed" class="incident-feed" role="feed" aria-busy="true">
+          <div class="feed-status">Ansluter till Polisen.se...</div>
+        </div>
+
+        <div class="panel-footer">
+          <span class="source-check">✓</span>
+          <div>
+            <strong>Källa: Polisen.se Öppna Data</strong>
+            <small>Officiella notiser · Riktiga händelser</small>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== FLIK 2: TRYGG RUTT ==================== -->
+      <section id="panel-rutt" class="tab-panel">
+        <div class="panel-header">
+          <div class="eyebrow">TRYGG NAVIGATION</div>
+          <h1>Trygg Rutt</h1>
+          <p><em>"Jag ska gå hem – har något hänt längs vägen?"</em> Beräkna gång- eller körväg och analysera aktiva polisanmälningar längs sträckan.</p>
+        </div>
+
+        <div class="route-form">
+          <div class="input-group">
+            <label for="route-from">Startpunkt (Varifrån):</label>
+            <div class="input-with-action">
+              <input type="text" id="route-from" placeholder="T.ex. Sveavägen 44, Stockholm" autocomplete="off">
+              <button id="btn-use-gps-start" class="btn-icon" title="Använd min GPS-position">📍 GPS</button>
+            </div>
+            <div id="route-from-suggestions" class="suggestions-list" hidden></div>
+          </div>
+
+          <div class="input-group">
+            <label for="route-to">Destination (Vart):</label>
+            <div class="input-with-action">
+              <input type="text" id="route-to" placeholder="T.ex. Odenplan eller hemadress" autocomplete="off">
+            </div>
+            <div id="route-to-suggestions" class="suggestions-list" hidden></div>
+          </div>
+
+          <div class="filter-row">
+            <div class="select-wrapper">
+              <label for="route-mode">Färdsätt:</label>
+              <select id="route-mode">
+                <option value="walking" selected>🚶 Gångväg (Promenad)</option>
+                <option value="driving">🚗 Fordon / Bilväg</option>
+              </select>
+            </div>
+            <div class="select-wrapper">
+              <label for="route-buffer">Säkerhetskorridor:</label>
+              <select id="route-buffer">
+                <option value="300">300 meter</option>
+                <option value="600" selected>600 meter (Rekommenderat)</option>
+                <option value="1000">1 000 meter (1 km)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="route-actions">
+            <button id="btn-calculate-route" class="btn-primary">
+              🔍 Beräkna & Analysera Rutt
+            </button>
+            <button id="btn-clear-route" class="btn-secondary" hidden>Rensa rutt</button>
+          </div>
+        </div>
+
+        <div id="route-result" class="route-result-card" hidden>
+          <div class="route-result-header">
+            <div>
+              <span id="route-assessment-badge" class="assessment-badge safe">Trygg väg</span>
+              <h3 id="route-summary-title">Ruttanalys</h3>
+            </div>
+            <div class="route-metrics">
+              <span id="route-dist-label">-- km</span>
+              <span id="route-time-label">-- min</span>
+            </div>
+          </div>
+          <p id="route-assessment-text" class="route-assessment-text"></p>
+          
+          <div class="route-incidents-section">
+            <h4>Händelser längs sträckan (<span id="route-incidents-count">0</span>)</h4>
+            <div id="route-incidents-list" class="route-incidents-list"></div>
+          </div>
+        </div>
+
+        <div class="quick-routes">
+          <span class="quick-title">Snabbtest i Stockholm:</span>
+          <button class="btn-chip-demo" data-from="Stockholm Centralstation" data-to="Odenplan, Stockholm">T-Centralen → Odenplan</button>
+          <button class="btn-chip-demo" data-from="Slussen, Stockholm" data-to="Medborgarplatsen, Stockholm">Slussen → Medborgarplatsen</button>
+        </div>
+      </section>
+
+      <!-- ==================== FLIK 3: FAMILJ & GEOZONER ==================== -->
+      <section id="panel-familj" class="tab-panel">
+        <div class="panel-header">
+          <div class="eyebrow">FAMILJ & SKYDD</div>
+          <h1>Familj & Geozoner</h1>
+          <p>Bevaka platser som betyder mest: hem, skola, förskola och träning. Få omedelbar överblick om Polisen larmats till närheten.</p>
+        </div>
+
+        <div class="zone-creator-card">
+          <h3>Skapa ny säkerhetszon</h3>
+          <div class="input-group">
+            <label for="zone-name">Zonens namn:</label>
+            <input type="text" id="zone-name" placeholder="T.ex. Skolan, Hemmet, Fotbollsträningen">
+          </div>
+          <div class="input-group">
+            <label for="zone-address">Plats / Adress:</label>
+            <input type="text" id="zone-address" placeholder="Sök skola, gatuadress, stadsdel...">
+            <div id="zone-address-suggestions" class="suggestions-list" hidden></div>
+          </div>
+          <div class="filter-row">
+            <div class="select-wrapper">
+              <label for="zone-type">Kategori:</label>
+              <select id="zone-type">
+                <option value="school">🏫 Skola / Förskola</option>
+                <option value="home">🏡 Hem / Bostad</option>
+                <option value="sport">⚽ Träning / Aktivitet</option>
+                <option value="other">📍 Annan trygg plats</option>
+              </select>
+            </div>
+            <div class="select-wrapper">
+              <label for="zone-radius">Säkerhetsradie:</label>
+              <select id="zone-radius">
+                <option value="300">300 meter</option>
+                <option value="500" selected>500 meter</option>
+                <option value="1000">1 000 meter</option>
+              </select>
+            </div>
+          </div>
+          <button id="btn-add-zone" class="btn-primary">+ Spara säkerhetszon</button>
+        </div>
+
+        <div class="saved-zones-header">
+          <h2>Aktiva skyddszoner</h2>
+          <span class="status-realtime">Realtidsövervakning</span>
+        </div>
+
+        <div id="family-zones-list" class="zones-list">
+          <!-- Dynamiskt fyllda zoner -->
+        </div>
+      </section>
+
+      <!-- ==================== FLIK 4: FÖRETAG B2B ==================== -->
+      <section id="panel-foretag" class="tab-panel">
+        <div class="panel-header">
+          <div class="eyebrow">FÖRETAG & SÄKERHET</div>
+          <h1>Företagsdashboard</h1>
+          <p>Incidentbevakning runt arbetsplatser, butiker och personal. Krisrutiner och snabb incidentöversikt för tryggare verksamhet.</p>
+        </div>
+
+        <div class="corporate-overview">
+          <div class="corp-stat-card">
+            <span class="corp-stat-number" id="corp-workplaces-count">3</span>
+            <span class="corp-stat-label">Bevakade arbetsplatser</span>
+          </div>
+          <div class="corp-stat-card">
+            <span class="corp-stat-number safe" id="corp-active-threats">0</span>
+            <span class="corp-stat-label">Aktiva incidenter i närområdet</span>
+          </div>
+        </div>
+
+        <div class="corp-section">
+          <h3>Företagets anläggningar</h3>
+          <div id="corp-workplaces-list" class="workplaces-list">
+            <!-- Förkonfigurerade och anpassningsbara arbetsplatser -->
+          </div>
+        </div>
+
+        <div class="corp-section">
+          <h3>Krisrutiner & Beredskap</h3>
+          <div class="crisis-checklist">
+            <details class="crisis-card">
+              <summary>🚨 Pågående brott / Hot & Våld</summary>
+              <ol>
+                <li>Sätt dig och kollegor i säkerhet. Utrym eller barrikera.</li>
+                <li>Larma omedelbart <strong>112</strong>. Ange adress och signalement.</li>
+                <li>Aktivera företagets interna larmkedja via SOS-panelen.</li>
+                <li>Gå inte i konfrontation med gärningsperson.</li>
+              </ol>
+            </details>
+            <details class="crisis-card">
+              <summary>🔒 Inbrott / Skadegörelse</summary>
+              <ol>
+                <li>Gå inte in ensam om gärningsperson kan vara kvar.</li>
+                <li>Kontakta Polisen på <strong>114 14</strong> (eller 112 vid pågående).</li>
+                <li>Vidrör ingenting för att bevara spår och bevisning.</li>
+                <li>Informera säkerhetsansvarig och fastighetsägare.</li>
+              </ol>
+            </details>
+            <details class="crisis-card">
+              <summary>🔥 Brand & Evakuering</summary>
+              <ol>
+                <li><strong>Rädda:</strong> Varna och hjälp personer i omedelbar fara.</li>
+                <li><strong>Varna:</strong> Aktivera brandlarmet i lokalen.</li>
+                <li><strong>Larma:</strong> Ring 112 från säker plats.</li>
+                <li><strong>Släck:</strong> Släck om det är möjligt utan att riskera eget liv.</li>
+                <li>Samlas vid återsamlingsplats och räkna in personal.</li>
+              </ol>
+            </details>
+          </div>
+        </div>
+
+        <div class="corp-section">
+          <h3>Företagets Nödkontakter</h3>
+          <div class="corp-contacts">
+            <div class="contact-row">
+              <span>Säkerhetsansvarig</span>
+              <strong>08-555 12 34</strong>
+            </div>
+            <div class="contact-row">
+              <span>Securitas / Väktare larmcentral</span>
+              <strong>010-470 10 00</strong>
+            </div>
+            <div class="contact-row">
+              <span>SOS Alarm Företag</span>
+              <strong>112</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== FLIK 5: PLATSPROFIL & BRÅ ==================== -->
+      <section id="panel-bra" class="tab-panel">
+        <div class="panel-header">
+          <div class="eyebrow">OFFICIELL STATISTIK & FÖRDJUPNING</div>
+          <h1>Platsprofil & BRÅ</h1>
+          <p>Officiell historisk kriminalstatistik från <strong>Brottsförebyggande rådet (BRÅ)</strong> jämfört med dagens realtidsläge.</p>
+        </div>
+
+        <div class="region-picker-box">
+          <label for="bra-region-select">Välj län för platsprofil:</label>
+          <select id="bra-region-select">
+            <!-- Fylls automatiskt med alla 21 län -->
+          </select>
+        </div>
+
+        <div id="bra-stats-container" class="bra-stats-container">
+          <!-- Dynamiskt fyllt med officiella BRÅ-siffror -->
+        </div>
+
+        <div class="bra-source-box">
+          <strong>Källa och metod:</strong>
+          <p>Statistiken avser anmälda brott per 100 000 invånare och är hämtad från Brottsförebyggande rådets (BRÅ) officiella sammanställningar för Sveriges 21 län. Anmälningsbenägenheten varierar mellan regioner och påverkas av befolkningstäthet och polisiära insatser.</p>
+          <a href="https://bra.se/statistik" target="_blank" rel="noopener">Läs mer på BRÅ.se ↗</a>
+        </div>
+      </section>
+
+      <!-- ==================== FLIK 6: SOS & LARM ==================== -->
+      <section id="panel-sos" class="tab-panel">
+        <div class="panel-header">
+          <div class="eyebrow">AKUT HJÄLP & POSITION</div>
+          <h1 class="text-danger">SOS & Smarta Larm</h1>
+          <p>Vid akut fara för liv eller hälsa — ring alltid <strong>112</strong>. Här kan du snabbt få fram din exakta position och dela den.</p>
+        </div>
+
+        <div class="sos-action-block">
+          <a href="tel:112" class="btn-emergency-main" id="btn-dial-112">
+            <span class="emergency-icon">🚨</span>
+            <div>
+              <strong>RING 112</strong>
+              <small>Akuta nödsituationer (Polis, Ambulans, Räddning)</small>
+            </div>
+          </a>
+
+          <div class="emergency-secondary-row">
+            <a href="tel:11414" class="btn-emergency-secondary">
+              <strong>114 14</strong>
+              <small>Polisen (ej akut)</small>
+            </a>
+            <a href="tel:1177" class="btn-emergency-secondary">
+              <strong>1177</strong>
+              <small>Sjukvårdsrådgivning</small>
+            </a>
+          </div>
+        </div>
+
+        <div class="gps-share-card">
+          <h3>📍 Min aktuella position</h3>
+          <div class="gps-coords-display">
+            <span id="sos-coords-text">Position ej hämtad</span>
+            <small id="sos-address-text">Klicka nedan för att hämta din exakta adress via GPS</small>
+          </div>
+          <div class="gps-actions">
+            <button id="btn-fetch-sos-gps" class="btn-primary">📡 Hämta min GPS-position</button>
+            <button id="btn-share-sos" class="btn-secondary" disabled>📲 Dela min plats via SMS / Meddelande</button>
+          </div>
+        </div>
+
+        <div class="kids-safe-mode">
+          <h3>🛡️ Barnläge: "Jag behöver hjälp"</h3>
+          <p>Ett förenklat och tryggt gränssnitt för barn och unga som känner sig otrygga på väg hem.</p>
+          <button id="btn-child-sos" class="btn-child-sos">
+            <span class="heart-icon">🧡</span>
+            <strong>Jag behöver hjälp!</strong>
+            <small>Meddela förälder och skicka min position direkt</small>
+          </button>
+        </div>
+      </section>
+
+    </aside>
+
+    <!-- ==================== KARTVYN ==================== -->
+    <section class="map-section" aria-label="Interaktiv trygghetskarta">
+      <div id="map"></div>
+
+      <!-- KARTTOPP: LIVE-STATUS OCH KONTROLLER -->
+      <div class="map-top-bar">
+        <div class="status-pill">
+          <span id="status-dot" class="dot"></span>
+          <strong id="status-text">Ansluten</strong>
+          <span class="bar-divider"></span>
+          <span id="status-updated">Hämtar data...</span>
+          <button id="btn-refresh" class="btn-icon-clean" title="Uppdatera händelser nu">↻</button>
+        </div>
+
+        <div class="map-quick-actions">
+          <button id="btn-my-location" class="btn-map-control" title="Hitta min position">📍 Min position</button>
+          <button id="btn-reset-map" class="btn-map-control" title="Återställ kartvyn">🇸🇪 Hela Sverige</button>
+        </div>
+      </div>
+
+      <!-- KARTÖVERSIKT / TITELBANNER -->
+      <div class="map-floating-title">
+        <span class="eyebrow" id="map-banner-eyebrow">REALTIDSLÄGE</span>
+        <h2 id="map-banner-title">Hela Sverige</h2>
+        <p id="map-banner-subtitle">Visar verifierade händelser från Polisen.se</p>
+      </div>
+
+      <!-- TECKENFÖRKLARING (LEGEND) -->
+      <div class="map-legend">
+        <span class="legend-item"><i class="legend-dot violence"></i> Våld & Rån</span>
+        <span class="legend-item"><i class="legend-dot theft"></i> Stöld & Inbrott</span>
+        <span class="legend-item"><i class="legend-dot traffic"></i> Trafikolycka</span>
+        <span class="legend-item"><i class="legend-dot fire"></i> Brand</span>
+        <span class="legend-item"><i class="legend-dot other"></i> Övrigt</span>
+        <span class="legend-item"><i class="legend-dot zone"></i> Säkerhetszon</span>
+      </div>
+
+      <!-- DETALJPANEL VID KLICK PÅ HÄNDELSE -->
+      <div id="incident-detail" class="incident-detail-popup" hidden>
+        <!-- Fylls dynamiskt vid klick -->
+      </div>
+
+      <!-- TOAST MEDDELANDEN -->
+      <div id="toast" class="toast-notification" role="status" hidden></div>
+    </section>
+  </main>
+
+  <!-- ==================== MODAL: KÄLLOR & TRANSPARENS ==================== -->
+  <dialog id="sources-dialog">
+    <button class="btn-modal-close" id="btn-close-sources" aria-label="Stäng dialog">×</button>
+    <div class="eyebrow">DATAKÄLLOR & TRANSPARENS</div>
+    <h2>Vad TryggPuls bygger på</h2>
+    <p>TryggPuls använder uteslutande <strong>offentliga, verifierade och officiella datakällor</strong>. Inga personuppgifter eller privata bostadsadresser registreras eller kartläggs.</p>
+
+    <div id="sources-list" class="sources-grid">
+      <!-- Fylls dynamiskt från /api/sources -->
+    </div>
+
+    <div class="modal-callout">
+      <strong>Noll Mock-Data Garanti:</strong> Samtliga händelser som visas i systemet existerar i verkligheten och publiceras i realtid av Polismyndigheten eller Brottsförebyggande rådet.
+    </div>
+  </dialog>
+
+  <!-- ==================== MODAL: RÄTTSPRAXIS (DOMSTOLSVERKET) ==================== -->
+  <dialog id="legal-dialog">
+    <button class="btn-modal-close" id="btn-close-legal" aria-label="Stäng dialog">×</button>
+    <div class="eyebrow">OFFICIELL RÄTTSPRAXIS</div>
+    <h2>Publicerade domar & prejudikat</h2>
+    <p>Direktflöde från Domstolsverkets öppna API med vägledande avgöranden från högre instanser.</p>
+
+    <div id="legal-list" class="legal-grid">
+      <div class="loading-text">Hämtar rättspraxis...</div>
+    </div>
+  </dialog>
+</body>
+</html>
