@@ -48,20 +48,69 @@ const map = L.map('map', {
 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+// Skarpa, infödda mörka kartrutor från CartoDB Dark Matter (inga CSS-filter som förstör plattorna)
+const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   maxZoom: 19,
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | Polisen.se'
+  subdomains: 'abcd',
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a> | Polisen.se'
 }).addTo(map);
 
+// Fallback till OpenStreetMap om CartoDB skulle blockeras.
+// VIKTIGT: exakt EN GÅNG. Utan flagga skulle VARJE enskild tileerror lägga
+// till ett helt nytt OSM-lager ovanpå kartan -> staplade lager och en
+// tillfällig network-error bytte basunderlag permanent.
+let basemapFallbackUsed = false;
 tileLayer.on('tileerror', () => {
-  showToast('Kunde inte ladda alla kartrutor. Händelser visas fortfarande i listan.');
+  if (basemapFallbackUsed) return;
+  basemapFallbackUsed = true;
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
 });
+
+// Säkerställ att kartans dimensioner ritas om så att inga tomma/grå rutor uppstår:
+// 1) kort efter start, 2) vid fönster-resize, 3) när sidan är helt laddad
+//    (tiles + paneller kan ändra layout efter init), 4) ResizeObserver på #map —
+//    det starkaste skyddet, fångar ALLA layoutändringar (flikväxling, sidopanel
+//    expanderas, responsive brytpunkter, dockade panels) även utan window-resize.
+//    Leaflet är ett no-op-anrop när storleken ej ändrats, så kostnaden är minimal.
+setTimeout(() => map.invalidateSize(), 150);
+window.addEventListener('resize', () => map.invalidateSize());
+window.addEventListener('load', () => map.invalidateSize());
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(() => map.invalidateSize()).observe(document.getElementById('map'));
+}
 
 // Kartlager
 const markersLayer = L.layerGroup().addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
 const zonesLayer = L.layerGroup().addTo(map);
 const userLayer = L.layerGroup().addTo(map);
+
+// Säkerhetskorridor (ruttanalys): halvgenomskinlig bård runt rutten.
+// Referens hålls i ett var så att zoomend kan uppdatera bredden.
+let corridorLine = null;
+
+// Bredd i pixlar för vald buffert. Korridorn sträcker sig vald buffert PÅ VARJE
+// SIDA av rutten, dvs total visuell bredd = 2 × buffert. Meter -> pixel via
+// Web-Mercator: m/px = 156543.03392 * cos(lat) / 2^zoom (utvärderas i kartans centrum).
+function corridorWidthPx() {
+  const buffer = state.currentRouteData?.bufferMeters;
+  if (!Number.isFinite(buffer) || buffer <= 0) return 0;
+  const zoom = map.getZoom();
+  if (!Number.isFinite(zoom) || zoom <= 0) return 0;
+  const lat = map.getCenter()?.lat ?? 0;
+  const metersPerPixel = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
+  if (metersPerPixel <= 0) return 0;
+  // Tak på 320 px så att extrem zoom-in inte skapar en ohanterlig bård
+  return Math.min(320, Math.max(2, (2 * buffer) / metersPerPixel));
+}
+
+// Uppdatera korridorbredden när zoomnivån ändras (m/px ändras)
+map.on('zoomend', () => {
+  if (corridorLine) corridorLine.setStyle({ weight: corridorWidthPx() });
+});
 
 // Hjälpfunktioner för datum & tid
 function formatSwedishTime(ts) {
@@ -128,6 +177,7 @@ function setActiveTab(tabKey) {
 
   // Anpassa kartlagren för aktiv flik
   updateMapLayersForTab();
+  setTimeout(() => map.invalidateSize(), 50);
 }
 
 function updateMapLayersForTab() {
@@ -450,6 +500,14 @@ function renderRouteResult(data) {
   $('#route-dist-label').textContent = `${data.distanceKm} km`;
   $('#route-time-label').textContent = `${data.durationMinutes} min (${data.mode === 'driving' ? 'bil' : 'gång'})`;
   $('#route-assessment-text').textContent = data.assessment;
+  // Ärlig markering om polisens händelsedata var cachelagd/föråldrad vid analysen
+  if (data.eventsStale) {
+    const note = document.createElement('p');
+    note.className = 'route-stale-note';
+    note.textContent = 'Obs: händelsedatan kan vara föråldrad' +
+      (data.eventsFetchedAt ? ' (senast lyckad hämtning ' + formatSwedishTime(Date.parse(data.eventsFetchedAt)) + ')' : '') + '.';
+    $('#route-assessment-text').appendChild(note);
+  }
   $('#route-incidents-count').textContent = data.incidentsCount;
 
   const list = $('#route-incidents-list');
@@ -468,9 +526,23 @@ function renderRouteResult(data) {
 
 function renderRouteOnMap() {
   routeLayer.clearLayers();
+  corridorLine = null;
   if (!state.currentRouteData || !state.currentRouteData.geometry) return;
 
   const coords = state.currentRouteData.geometry.coordinates.map(c => [c[1], c[0]]);
+
+  // Rita säkerhetskorridorn FÖRST (renderas under ruttlinjen): bred, halvgenomskinlig
+  // bård vars bredd motsvarar den valda bufferten (± buffert meter från rutten)
+  if (coords.length > 1 && corridorWidthPx() > 0) {
+    corridorLine = L.polyline(coords, {
+      color: '#f59e0b',
+      weight: corridorWidthPx(),
+      opacity: 0.12,
+      lineJoin: 'round',
+      lineCap: 'round',
+      interactive: false
+    }).addTo(routeLayer);
+  }
 
   // Rita själva ruttlinjen
   const routeLine = L.polyline(coords, {
@@ -518,6 +590,7 @@ function clearRoute() {
   $('#route-result').hidden = true;
   $('#btn-clear-route').hidden = true;
   routeLayer.clearLayers();
+  corridorLine = null;
   showToast('Rutt rensad.');
 }
 
