@@ -13,6 +13,8 @@ setText('.map-heading .eyebrow','DEN STÖRRE BILDEN');setText('.map-button span'
 setText('.legend-note','Antal grupperar notiser vid samma områdescentrum');setText('.map-note','ⓘ  Ungefärliga områdescentrum, inte händelseplatser. Notiser kan vara fördröjda.');
 setText('#sources-dialog .eyebrow','KÄLLTRANSPARENS');setText('#sources-dialog h2','Vad kartan bygger på.');
 setText('#sources-dialog p','Varje källa har en tydlig publik roll. Pulse använder inte person-, adress- eller bostadsuppgifter i denna vy.');
+setText('#about-dialog .eyebrow','LÄR KÄNN DIN KÄLLA');setText('#about-dialog h2','Medvetenhet med sammanhang.');
+const aboutContexts=document.querySelectorAll('#about-dialog .data-context');if(aboutContexts[1])aboutContexts[1].textContent='Skatteverkets sida beskriver aggregerad, maskinläsbar statistik. DIGG beskriver ramverket för öppna data. Domstolsverkets anslutning här gäller publicerad rättspraxis från högre instanser, inte ett komplett flöde från tingsrätter.';
 const regionSelect=$('#region'),periodSelect=$('#period');
 if(regionSelect)regionSelect.setAttribute('aria-label','Område');
 if(periodSelect){periodSelect.setAttribute('aria-label','Tidsperiod');periodSelect.options[0].textContent='Senaste 24 timmarna';periodSelect.options[1].textContent='Senaste 3 dagarna';periodSelect.options[2].textContent='All tillgänglig data';}
