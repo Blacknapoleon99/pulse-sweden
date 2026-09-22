@@ -1,31 +1,15 @@
-# Render Web Service configuration for TryggPuls
-#
-# Architecture: a single Node process serves both the frontend
-# (index.html, app.js, style.css) and the backend API (/api/*).
-# No build step, no database, no external npm dependencies.
-#
-# Manual deploy:
-#   1. Open Render: https://dashboard.render.com
-#   2. New → Web Service
-#   3. Connect Blacknapoleon99/pulse-sweden
-#   4. Runtime: Node (20)
-#   5. Start command: npm start
-#   6. Health check path: /api/health
-#   7. Deploy
-
 services:
   - type: web
     name: tryggpuls
-    env: node
+    repo: https://github.com/Blacknapoleon99/pulse-sweden
+    branch: demo-polish-release
+    region: oregon
+    runtime: node
     plan: free
-    repoName: Blacknapoleon99/pulse-sweden
-    branch: main
-    buildCommand: ""
+    buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: "3000"
     autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "10000"
