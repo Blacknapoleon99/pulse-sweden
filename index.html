@@ -56,8 +56,8 @@
     </nav>
 
     <div class="header-actions">
-      <span class="badge-real-data" title="Samtliga händelser och rutter hämtas direkt från Polisen, BRÅ och OSRM">
-        ✓ 100% OFFICIELLA DATA
+      <span class="badge-real-data" title="Polisen, BRÅ & Domstolsverket är myndighetsdata. Karttjänster är öppna källor.">
+        ✓ Verifierade offentliga källor
       </span>
       <button id="btn-sources" class="btn-subtle" aria-label="Öppna källinformation">Källstatus</button>
       <button id="btn-legal" class="btn-subtle" aria-label="Öppna rättspraxis">Rättspraxis</button>
@@ -335,13 +335,13 @@
         <div class="panel-header">
           <div class="eyebrow">OFFICIELL STATISTIK & FÖRDJUPNING</div>
           <h1>Platsprofil & BRÅ</h1>
-          <p>Officiell historisk kriminalstatistik från <strong>Brottsförebyggande rådet (BRÅ)</strong> jämfört med dagens realtidsläge.</p>
+          <p>Officiell historisk kriminalstatistik från <strong>Brottsförebyggande rådet (BRÅ)</strong> över anmälda brott. Jämfört med dagens realtidsläge från Polisen.</p>
         </div>
 
         <div class="region-picker-box">
-          <label for="bra-region-select">Välj län för platsprofil:</label>
+          <label for="bra-region-select">Välj kommun för platsprofil:</label>
           <select id="bra-region-select">
-            <!-- Fylls automatiskt med alla 21 län -->
+            <!-- Fylls automatiskt med kommunerna -->
           </select>
         </div>
 
@@ -351,7 +351,7 @@
 
         <div class="bra-source-box">
           <strong>Källa och metod:</strong>
-          <p>Statistiken avser anmälda brott per 100 000 invånare och är hämtad från Brottsförebyggande rådets (BRÅ) officiella sammanställningar för Sveriges 21 län. Anmälningsbenägenheten varierar mellan regioner och påverkas av befolkningstäthet och polisiära insatser.</p>
+          <p>Statistiken avser anmälda brott per 100 000 invånare och är hämtad från Brottsförebyggande rådets (BRÅ) officiella sammanställningar. Data presenteras på <strong>kommun-nivå</strong>, inte länsnivå. Anmälningsbenägenheten varierar mellan regioner och påverkas av befolkningstäthet och polisiära insatser.</p>
           <a href="https://bra.se/statistik" target="_blank" rel="noopener">Läs mer på BRÅ.se ↗</a>
         </div>
       </section>
@@ -389,10 +389,10 @@
           <h3>📍 Min aktuella position</h3>
           <div class="gps-coords-display">
             <span id="sos-coords-text">Position ej hämtad</span>
-            <small id="sos-address-text">Klicka nedan för att hämta din exakta adress via GPS</small>
+            <small id="sos-address-text">Klicka nedan för att hämta din enhetsposition och adress via positionstjänst</small>
           </div>
           <div class="gps-actions">
-            <button id="btn-fetch-sos-gps" class="btn-primary">📡 Hämta min GPS-position</button>
+            <button id="btn-fetch-sos-gps" class="btn-primary">📡 Hämta min position</button>
             <button id="btn-share-sos" class="btn-secondary" disabled>📲 Dela min plats via SMS / Meddelande</button>
           </div>
         </div>
@@ -405,6 +405,12 @@
             <strong>Jag behöver hjälp!</strong>
             <small>Meddela förälder och skicka min position direkt</small>
           </button>
+        </div>
+
+        <div class="sos-privacy-note">
+          <strong>Om integritet:</strong> Din position hämtas av webbläsaren och lagras endast lokalt i din enhet.
+          Den skickas inte till TryggPuls eller någon server. När du delar skickas en kartlänk via din
+          enhets inbyggda SMS-/delafunktion.
         </div>
       </section>
 

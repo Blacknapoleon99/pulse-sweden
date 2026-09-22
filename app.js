@@ -25,18 +25,21 @@ const state = {
   routeTo: null,   // { name, lat, lon }
   currentRouteData: null,
 
-  // Familj & Geozoner (Sparade i LocalStorage med verifierade svenska platser)
+  // Familj & Geozoner (Sparade i LocalStorage med verifierade svenska platser).
+  // Förkonfigurerade zoner är EXEMPEL – de är inte riktiga övervakade platser.
+  // Användaren kan skapa egna zoner genom att söka riktiga adresser.
   zones: JSON.parse(localStorage.getItem('tryggpuls_zones') || 'null') || [
-    { id: 'z1', name: 'Hemmet', address: 'Götgatan, Södermalm, Stockholm', lat: 59.3150, lon: 18.0730, radius: 500, type: 'home' },
-    { id: 'z2', name: 'Skolan', address: 'Norra Real, Norrmalm, Stockholm', lat: 59.3450, lon: 18.0600, radius: 400, type: 'school' },
-    { id: 'z3', name: 'Träningen', address: 'Eriksdalsbadet, Södermalm, Stockholm', lat: 59.3050, lon: 18.0750, radius: 500, type: 'sport' }
+    { id: 'z1', name: 'Hemmet (Exempel)', address: 'Götgatan, Södermalm, Stockholm', lat: 59.3150, lon: 18.0730, radius: 500, type: 'home', demo: true },
+    { id: 'z2', name: 'Skolan (Exempel)', address: 'Norra Real, Norrmalm, Stockholm', lat: 59.3450, lon: 18.0600, radius: 400, type: 'school', demo: true },
+    { id: 'z3', name: 'Träningen (Exempel)', address: 'Eriksdalsbadet, Södermalm, Stockholm', lat: 59.3050, lon: 18.0750, radius: 500, type: 'sport', demo: true }
   ],
 
-  // Företag / Arbetsplatser B2B
+  // Företag / Arbetsplatser B2B.
+  // Dessa är DEMO-exempel, inte riktiga kunddata eller faktiska arbetsplatser.
   workplaces: JSON.parse(localStorage.getItem('tryggpuls_workplaces') || 'null') || [
-    { id: 'w1', name: 'Huvudkontor', address: 'Klarabergsviadukten 70, Stockholm', lat: 59.3305, lon: 18.0570, radius: 1000 },
-    { id: 'w2', name: 'Regionkontor Väst', address: 'Nordstan, Göteborg', lat: 57.7089, lon: 11.9700, radius: 1000 },
-    { id: 'w3', name: 'Butik Malmö City', address: 'Södergatan, Malmö', lat: 55.6040, lon: 13.0010, radius: 800 }
+    { id: 'w1', name: 'Huvudkontor (Demoarbetsplats)', address: 'Klarabergsviadukten 70, Stockholm', lat: 59.3305, lon: 18.0570, radius: 1000, demo: true },
+    { id: 'w2', name: 'Regionkontor Väst (Demoarbetsplats)', address: 'Nordstan, Göteborg', lat: 57.7089, lon: 11.9700, radius: 1000, demo: true },
+    { id: 'w3', name: 'Butik Malmö City (Demoarbetsplats)', address: 'Södergatan, Malmö', lat: 55.6040, lon: 13.0010, radius: 800, demo: true }
   ]
 };
 
@@ -401,21 +404,21 @@ function setupRouteSearch() {
   // GPS-knapp för startpunkt
   $('#btn-use-gps-start').addEventListener('click', () => {
     if (!navigator.geolocation) {
-      showToast('Din webbläsare stöder inte GPS-positionering.');
+      showToast('Din webbläsare stöder inte positionering.');
       return;
     }
-    fromInput.value = 'Söker din GPS-position...';
+    fromInput.value = 'Söker din enhetsposition...';
     navigator.geolocation.getCurrentPosition(
       pos => {
         const lat = pos.coords.latitude;
         const lon = pos.coords.longitude;
-        state.routeFrom = { name: 'Min aktuella GPS-position', lat, lon };
-        fromInput.value = 'Min aktuella GPS-position';
-        showToast('Startpunkt satt till din GPS-position!');
+        state.routeFrom = { name: 'Min aktuella enhetsposition', lat, lon };
+        fromInput.value = 'Min aktuella enhetsposition';
+        showToast('Startpunkt satt till din enhetsposition!');
       },
       () => {
         fromInput.value = '';
-        showToast('Kunde inte läsa av GPS-position. Kontrollera behörigheter.');
+        showToast('Kunde inte läsa av position. Kontrollera behörigheter.');
       },
       { enableHighAccuracy: true, timeout: 8000 }
     );
@@ -491,10 +494,10 @@ function renderRouteResult(data) {
   const badge = $('#route-assessment-badge');
   if (data.incidentsCount === 0) {
     badge.className = 'assessment-badge safe';
-    badge.textContent = '✓ Trygg sträcka';
+    badge.textContent = 'Inga rapporterade händelser i korridor';
   } else {
     badge.className = 'assessment-badge caution';
-    badge.textContent = `⚠️ ${data.incidentsCount} händelse${data.incidentsCount > 1 ? 'r' : ''} nära rutten`;
+    badge.textContent = `${data.incidentsCount} händelse${data.incidentsCount > 1 ? 'r' : ''} nära rutten`;
   }
 
   $('#route-dist-label').textContent = `${data.distanceKm} km`;
@@ -522,6 +525,12 @@ function renderRouteResult(data) {
       </div>
     `).join('');
   }
+
+  // Faktisk information — denna analys är INTE en trygghetsgaranti.
+  const disclaimer = document.createElement('p');
+  disclaimer.className = 'route-disclaimer';
+  disclaimer.textContent = 'Denna analys bygger på offentliga polisanmälningar och är endast informativ. Polisen publicerar inte varje enskild händelse, och avsaknad av händelser innebär inte att en sträcka är säker. Använd omdöme och förebyggande åtgärder.';
+  $('#route-assessment-text').appendChild(disclaimer);
 }
 
 function renderRouteOnMap() {
@@ -598,7 +607,7 @@ function clearRoute() {
 function renderFamilyZones() {
   const container = $('#family-zones-list');
   if (!state.zones.length) {
-    container.innerHTML = '<p style="color: var(--text-dim); font-size: 11px;">Inga zoner sparade ännu. Lägg till hemmet eller barnens skola ovan.</p>';
+    container.innerHTML = '<div class="empty-state"><p style="color: var(--text-dim); font-size: 11px; text-align: center; padding: 24px 12px;">Inga zoner sparade ännu.<br>Lägg till hemmet eller barnens skola ovan.</p></div>';
     return;
   }
 
@@ -612,14 +621,15 @@ function renderFamilyZones() {
 
     const isSafe = incidentsInZone.length === 0;
     const typeIcons = { school: '🏫', home: '🏡', sport: '⚽', other: '📍' };
+    const demoBadge = zone.demo ? ' <span class="demo-badge">Exempel</span>' : '';
 
     return `
       <div class="zone-item" data-id="${zone.id}">
         <div class="zone-info">
-          <h4>${typeIcons[zone.type] || '📍'} ${esc(zone.name)}</h4>
+          <h4>${typeIcons[zone.type] || '📍'} ${esc(zone.name)}${demoBadge}</h4>
           <p>${esc(zone.address)} (Radie: ${zone.radius}m)</p>
           <span class="zone-status-badge ${isSafe ? 'safe' : 'warning'}">
-            ${isSafe ? '✓ Inga händelser i zonen (Lugnt)' : `⚠️ ${incidentsInZone.length} aktiv händelse i närheten!`}
+            ${isSafe ? '✓ Inga rapporterade händelser i zonen' : `⚠️ ${incidentsInZone.length} rapporterad${incidentsInZone.length > 1 ? 'e händelser' : ' händelse'} i zonen`}
           </span>
         </div>
         <div class="zone-actions">
@@ -636,7 +646,7 @@ function renderFamilyZones() {
       const zone = state.zones.find(z => z.id === item.dataset.id);
       if (zone) {
         map.flyTo([zone.lat, zone.lon], 14, { duration: 0.8 });
-        showToast(`Visar säkerhetszon: ${zone.name}`);
+        showToast(`Visar zon: ${zone.name}`);
       }
     });
   });
@@ -780,13 +790,14 @@ function renderWorkplaces() {
 
     totalThreats += nearby.length;
     const isOk = nearby.length === 0;
+    const demoBadge = wp.demo ? ' <span class="demo-badge">Exempeldata</span>' : '';
 
     return `
       <div class="workplace-card" data-id="${wp.id}">
         <div class="workplace-card-top">
-          <strong>🏢 ${esc(wp.name)}</strong>
+          <strong>🏢 ${esc(wp.name)}${demoBadge}</strong>
           <span class="workplace-badge ${isOk ? 'ok' : 'alert'}">
-            ${isOk ? '✓ Normal drift' : `⚠️ ${nearby.length} incident`}
+            ${isOk ? '✓ Inga rapporterade händelser' : `⚠️ ${nearby.length} rapporterad${nearby.length > 1 ? 'e händelser' : ' händelse'}`}
           </span>
         </div>
         <p>${esc(wp.address)}</p>
@@ -805,7 +816,7 @@ function renderWorkplaces() {
       const wp = state.workplaces.find(w => w.id === card.dataset.id);
       if (wp) {
         map.flyTo([wp.lat, wp.lon], 14, { duration: 0.8 });
-        showToast(`Fokuserar på arbetsplats: ${wp.name}`);
+        showToast(`Fokuserar på: ${wp.name}`);
       }
     });
   });
@@ -868,78 +879,63 @@ function populateBraRegions() {
 function renderBraProfile() {
   if (!state.braData) return;
   const select = $('#bra-region-select');
-  const regionName = select.value || 'Stockholms län';
+  const regionName = select.value || (state.braData.regions && state.braData.regions[0] && state.braData.regions[0].region) || '';
   const region = state.braData.regions.find(r => r.region === regionName) || state.braData.regions[0];
-  const natAvg = state.braData.nationalAverage.totalPer100k;
+  if (!region) return;
 
+  const natAvg = state.braData.nationalAverage.totalPer100k;
   const diff = region.totalPer100k - natAvg;
   const diffPercent = Math.round((diff / natAvg) * 100);
-  const diffSign = diff >= 0 ? `+${diffPercent}% mot riket` : `${diffPercent}% mot riket`;
+  const diffSign = diff >= 0 ? `+${diffPercent}%` : `${diffPercent}%`;
+
+  const levelLabel = state.braData.level === 'kommun' ? 'kommun' : (state.braData.level || 'region');
+  const referenceYear = state.braData.referenceYear || 'okänt år';
+  const fetchedAt = state.braData.fetchedAt ? formatSwedishTime(Date.parse(state.braData.fetchedAt)) : 'saknas';
 
   const container = $('#bra-stats-container');
   container.innerHTML = `
     <div class="bra-summary-card">
+      <div class="bra-meta-row">
+        <span class="source-badge">${esc(levelLabel)}-nivå</span>
+        <span class="source-badge">År: ${esc(referenceYear)}</span>
+      </div>
       <h3>${esc(region.region)}</h3>
       <div class="bra-rate-display">
         <span class="bra-rate-number">${region.totalPer100k.toLocaleString('sv-SE')}</span>
-        <span class="bra-rate-compare">anmälda brott / 100 000 invånare (${diffSign})</span>
+        <span class="bra-rate-compare">anmälda brott / 100 000 invånare (${diffSign} mot rikssnittet ${natAvg.toLocaleString('sv-SE')})</span>
       </div>
       <span class="source-badge">${esc(region.riskIndex)}</span>
-      <p class="bra-analysis-text">${esc(region.analysis)}</p>
+      <p class="bra-analysis-text">
+        <strong>Antal anmälda brott:</strong> ${region.total.toLocaleString('sv-SE')} st<br>
+        <strong>Uppskattad befolkning:</strong> ${region.population ? region.population.toLocaleString('sv-SE') : 'saknas'} invånare<br>
+        <strong>Rankning:</strong> ${region.rank || 'saknas'} av ${state.braData.regionCount || '?'} ${levelLabel}er (efter anmälda brott per 100 000)<br>
+        <strong>Hämtad:</strong> ${fetchedAt}
+      </p>
     </div>
 
-    <div class="bra-bars-card">
-      <h4>Fördelning per brottskategori (BRÅ)</h4>
-      
-      <div class="bra-metric-row">
-        <div class="bra-metric-labels">
-          <span>Brott mot person (Våld & Hot)</span>
-          <strong>${region.categories.personViolence.toLocaleString('sv-SE')}</strong>
-        </div>
-        <div class="bra-metric-bar-bg">
-          <div class="bra-metric-bar-fill" style="width: ${(region.categories.personViolence / 4000) * 100}%; background: var(--accent-danger);"></div>
-        </div>
-      </div>
-
-      <div class="bra-metric-row">
-        <div class="bra-metric-labels">
-          <span>Tillgreppsbrott (Stöld, Inbrott)</span>
-          <strong>${region.categories.propertyTheft.toLocaleString('sv-SE')}</strong>
-        </div>
-        <div class="bra-metric-bar-bg">
-          <div class="bra-metric-bar-fill" style="width: ${(region.categories.propertyTheft / 7000) * 100}%; background: var(--accent-amber);"></div>
-        </div>
-      </div>
-
-      <div class="bra-metric-row">
-        <div class="bra-metric-labels">
-          <span>Skadegörelse</span>
-          <strong>${region.categories.vandalism.toLocaleString('sv-SE')}</strong>
-        </div>
-        <div class="bra-metric-bar-bg">
-          <div class="bra-metric-bar-fill" style="width: ${(region.categories.vandalism / 2500) * 100}%; background: var(--accent-purple);"></div>
-        </div>
-      </div>
-
-      <div class="bra-metric-row">
-        <div class="bra-metric-labels">
-          <span>Trafikbrott</span>
-          <strong>${region.categories.traffic.toLocaleString('sv-SE')}</strong>
-        </div>
-        <div class="bra-metric-bar-bg">
-          <div class="bra-metric-bar-fill" style="width: ${(region.categories.traffic / 2000) * 100}%; background: var(--accent-blue);"></div>
-        </div>
-      </div>
-
-      <div class="bra-metric-row">
-        <div class="bra-metric-labels">
-          <span>Narkotikabrott</span>
-          <strong>${region.categories.narcotics.toLocaleString('sv-SE')}</strong>
-        </div>
-        <div class="bra-metric-bar-bg">
-          <div class="bra-metric-bar-fill" style="width: ${(region.categories.narcotics / 1600) * 100}%; background: #059669;"></div>
-        </div>
-      </div>
+    <div class="bra-source-card">
+      <h4>Källa & metod</h4>
+      <p>
+        Data hämtas live från Brottsförebyggande rådets (BRÅ) officiella statistik
+        över anmälda brott. Statistiken presenteras på <strong>${levelLabel}</strong>-nivå,
+        vilket innebär att siffrorna avser hela kommunens anmälda brott, inte
+        en specifik stadsdel eller gata.
+      </p>
+      <p>
+        <strong>OBS — denna statistik visar inte:</strong> områdets faktiska trygghet.
+        Anmälningsfrekvensen påverkas av många faktorer, bland annat polisens
+        synlighet, anmälningsbenägenhet och befolkningstäthet. Ett område med många
+        anmälningar kan ha en hög polisnärvaro, medan ett område med få anmälningar
+        inte automatiskt är tryggast.
+      </p>
+      <p>
+        Jämförelsen mot rikssnittet är befolkningsviktat och beräknas från samma
+        datakälla. Rikssnittet är <strong>${natAvg.toLocaleString('sv-SE')}</strong>
+        anmälda brott per 100 000 invånare.
+      </p>
+      <a href="${esc(state.braData.sourceUrl || 'https://bra.se/statistik')}" target="_blank" rel="noopener">
+        Läs mer på BRÅ.se ↗
+      </a>
     </div>
   `;
 }
@@ -952,11 +948,11 @@ function setupSosFeatures() {
 
   $('#btn-fetch-sos-gps').addEventListener('click', () => {
     if (!navigator.geolocation) {
-      showToast('GPS stöds inte av denna webbläsare.');
+      showToast('Positionering stöds inte av denna webbläsare.');
       return;
     }
 
-    coordsText.textContent = 'Läser av satellitkoordinater...';
+    coordsText.textContent = 'Läser av enhetsposition...';
     navigator.geolocation.getCurrentPosition(
       async pos => {
         const lat = pos.coords.latitude;
@@ -967,24 +963,26 @@ function setupSosFeatures() {
         renderUserGpsOnMap();
         map.flyTo([lat, lon], 16, { duration: 1 });
 
-        // Hämta gatuadress via Nominatim
+        // Hämta gatuadress via Nominatim (backend-mediad, se server.mjs)
         try {
-          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`);
+          const res = await fetch(`/api/reverse-geocode?lat=${lat}&lon=${lon}`);
           const data = await res.json();
-          if (data.display_name) {
-            state.userAddress = data.display_name;
-            addressText.textContent = data.display_name;
+          if (data.address) {
+            state.userAddress = data.address;
+            addressText.textContent = data.address;
+          } else {
+            addressText.textContent = 'Adress kunde inte slås upp; koordinater är aktiva.';
           }
         } catch {
-          addressText.textContent = 'Gatuadress kunde inte slås upp; koordinater är aktiva.';
+          addressText.textContent = 'Adress kunde inte slås upp; koordinater är aktiva.';
         }
 
         shareBtn.disabled = false;
-        showToast('Din exakta GPS-position är nu registrerad!');
+        showToast('Position hämtad — lagras endast lokalt i din enhet.');
       },
       err => {
-        coordsText.textContent = 'Kunde inte hämta GPS';
-        showToast('Kunde inte läsa GPS. Säkerställ att platstjänster är aktiverade.');
+        coordsText.textContent = 'Kunde inte hämta position';
+        showToast('Kunde inte läsa position. Kontrollera att platstjänster är aktiverade.');
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );

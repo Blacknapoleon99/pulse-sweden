@@ -687,6 +687,16 @@ select:focus {
   padding-left: 8px;
 }
 
+.route-disclaimer {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+}
+
 .route-incidents-section h4 {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -962,6 +972,39 @@ select:focus {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-muted);
+}
+
+/* Demo-data badge — tydlig etikett på exempeldata */
+.demo-badge {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 5px;
+  background: rgba(255, 170, 0, 0.12);
+  color: var(--accent-amber);
+  border: 1px solid rgba(255, 170, 0, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* SOS-privacy note */
+.sos-privacy-note {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  padding: 10px;
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.sos-privacy-note strong {
+  color: var(--accent-emerald);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.5px;
 }
 
 .crisis-checklist {

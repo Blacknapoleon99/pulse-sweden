@@ -11,6 +11,9 @@ const braPageUrl = 'https://bra.se/statistik/statistik-fran-rattsvasendet/anmald
 const braCacheTtlMs = 24 * 60 * 60 * 1000; // 24 h
 const braRetryBackoffMs = 60_000; // nya försök 60 s efter misslyckad hämtning
 const port = Number(process.env.PORT) || 3000;
+// Cloud deployment (Render, etc.) kräver att servern lyssnar på en extern,
+// reachbar interface – annars kan inte health-checken eller trafiken nå den.
+const host = process.env.HOST || '0.0.0.0';
 const useragent = 'TryggPuls/2.0 (kontakta@tryggpuls.se)';
 
 // Fel med HTTP-statuskod, används för upström fel i /api/route och /api/geocode
@@ -21,6 +24,13 @@ class UpstreamError extends Error {
     this.status = status;
     this.upstreamStatus = upstreamStatus;
   }
+}
+
+// Enkel, konsistent felshape för API-svar. Används inte överallt (vissa
+// endpoints returnerar redan sin egen struktur), men ger möjlighet till
+// enhetlig logging och framtida client-hantering.
+function apiError(status, message, code, source) {
+  return { error: message, code: code || 'UNKNOWN', source: source || null };
 }
 
 // fetch med tidsgräns och konsekvent felhantering:
@@ -124,12 +134,17 @@ function readNumberParam(url, name) {
   return Number.isFinite(value) ? value : null;
 }
 
-// Normalisera polisens tidsformat till ISO: "2026-09-22 14:32:00+0200" -> "2026-09-22T14:32:00+02:00"
+// Normalisera polisens tidsformat till ISO.
+// Polisen returnerar t.ex. "2026-09-22 17:10:38 +02:00" (med mellanslag
+// före tidszonen). Ett enkel `replace(' ', 'T')` byter endast den FÖRSTA
+// mellanslaget, så zonen becomes "T17:10:38 +02:00" och Date.parse misslyckas.
+// Vi tar bort ALLA mellanslag före parsning och normaliserar sedan +0200 -> +02:00.
 function parseSwedishTime(s) {
   const raw = String(s ?? '').trim();
   if (!raw) return NaN;
-  let iso = raw.replace(' ', 'T');
-  iso = iso.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'); // +0200 -> +02:00
+  let iso = raw.replace(/\s+/g, '');               // ta bort ALLA mellanslag
+  iso = iso.replace(/T(\d{2}):?(\d{2})$/, 'T$1:$2'); // normalisera "T171038" -> "T17:10:38"
+  iso = iso.replace(/([+-]\d{2}):?(\d{2})$/, '$1:$2'); // +0200 -> +02:00
   const parsed = Date.parse(iso);
   if (Number.isFinite(parsed)) return parsed;
   // Sista tillfället: utan tidszon (tolkas som lokal tid)
@@ -493,6 +508,17 @@ async function geocodeSwedishAddress(query) {
   }));
 }
 
+// Reverse-geocode: koordinater -> adress via Nominatim (backend-mediad).
+// Används av SOS-panelen för att visa en läsbar adress till enhetens position.
+// Position skickas aldrig till servern – endast för att slå upp ett gatuvisningsnamn.
+async function reverseGeocode(lat, lon) {
+  const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
+  const response = await upstreamFetch(url, 10_000);
+  const data = await response.json();
+  if (!data || !data.display_name) return null;
+  return data.display_name;
+}
+
 // Ruttberäkning via OSRM med analys av verkliga incidenter längs vägen.
 // Kastar UpstreamError(502) om Polisens händelsedata saknas helt: en rutt utan
 // incidentanalys skulle kunna ge en falsk "trygg"-bedömning (inga mockdata,
@@ -620,6 +646,26 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Reverse-geocode: koordinater -> adress (Nominatim, backend-mediad för
+    // att undvika direkttrop från webbläsaren och för att kunna sätta en
+    // respektfull User-Agent).
+    if (url.pathname === '/api/reverse-geocode') {
+      const lat = readNumberParam(url, 'lat');
+      const lon = readNumberParam(url, 'lon');
+      if (lat === null || lon === null || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        return json(req, res, 400, { error: 'Ogiltiga koordinater (lat/lon)' });
+      }
+      try {
+        const addr = await reverseGeocode(lat, lon);
+        return json(req, res, 200, { lat, lon, address: addr });
+      } catch (err) {
+        if (err instanceof UpstreamError) {
+          return json(req, res, err.status, { error: err.message });
+        }
+        return json(req, res, 502, { error: 'Kunde inte slå upp adress' });
+      }
+    }
+
     if (url.pathname === '/api/route') {
       // readNumberParam -> null om saknad/ogiltig (förhindrar att Number(null)=0
       // accepteras som koordinat, vilket var ett latent fel i den äldre versionen)
@@ -693,6 +739,27 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(port, '127.0.0.1', () => {
-  console.log(`TryggPuls startad: http://localhost:${port}`);
+server.listen(port, host, () => {
+  console.log(`TryggPuls startad: http://localhost:${port} (lyssnar på ${host})`);
 });
+
+// Graceful shutdown – låter pågående förfrågningar avslutas innan processen dör.
+function shutdown(signal) {
+  console.log(`[server] Mottog ${signal} – avslutar grantfully...`);
+  server.close(err => {
+    if (err) {
+      console.error('[server] Fel vid stängning:', err.message);
+      process.exit(1);
+    }
+    console.log('[server] Servern stängdes.');
+    process.exit(0);
+  });
+  // Tvinga avslut om något hänger kvar efter 10 s.
+  setTimeout(() => {
+    console.error('[server] Tidsgräns för gracefull avslutning överskriden – tvingar avslut.');
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
