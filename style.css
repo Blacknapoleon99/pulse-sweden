@@ -1791,6 +1791,25 @@ dialog p {
   flex-shrink: 0;
 }
 
+/* Empty state — used when lists are empty */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+  background: var(--bg-card);
+  border: 1px dashed var(--border-color);
+}
+
+.empty-state p {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
 /* ==================== RESPONSIVITET ==================== */
 @media (max-width: 992px) {
   header {
@@ -1829,5 +1848,64 @@ dialog p {
     right: 10px;
     width: auto;
     bottom: 10px;
+  }
+}
+
+/* Mobil: sidopanel byts ut mot en översiktlig informationpanel */
+@media (max-width: 640px) {
+  header {
+    padding: 8px 10px;
+  }
+
+  .brand-subtitle {
+    display: none;
+  }
+
+  .badge-real-data {
+    display: none;
+  }
+
+  .main-nav {
+    gap: 0;
+  }
+
+  .nav-tab {
+    padding: 8px 6px;
+  }
+
+  .nav-label {
+    display: none;
+  }
+
+  .map-floating-title {
+    top: 56px;
+    left: 8px;
+    right: 8px;
+    padding: 6px 8px;
+  }
+
+  .map-legend {
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    justify-content: center;
+    gap: 8px;
+    font-size: 8px;
+  }
+
+  .map-top-bar {
+    top: 8px;
+    left: 8px;
+    right: 8px;
+  }
+
+  .status-pill {
+    font-size: 9px;
+    padding: 4px 6px;
+  }
+
+  .btn-map-control {
+    font-size: 9px;
+    padding: 4px 6px;
   }
 }

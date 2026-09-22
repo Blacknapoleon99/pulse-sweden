@@ -1,10 +1,17 @@
 {
   "name": "tryggpuls",
-  "version": "2.0.0",
-  "description": "TryggPuls — Sveriges Digitala Trygghetsplattform",
+  "version": "2.0.1",
+  "description": "TryggPuls — en demo av en svensk civic/sakerhetskarta byggd pa verifierade offentliga datakallor",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check app.js && echo 'Syntax Ok'",
+    "test": "node --test tests/*.test.mjs",
+    "test:unit": "node --test tests/timestamp.test.mjs tests/buffer.test.mjs tests/geometry.test.mjs tests/bra.test.mjs tests/categorize.test.mjs",
+    "test:smoke": "node --test tests/smoke.test.mjs"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }

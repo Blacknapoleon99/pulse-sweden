@@ -138,13 +138,14 @@ function readNumberParam(url, name) {
 // Polisen returnerar t.ex. "2026-09-22 17:10:38 +02:00" (med mellanslag
 // före tidszonen). Ett enkel `replace(' ', 'T')` byter endast den FÖRSTA
 // mellanslaget, så zonen becomes "T17:10:38 +02:00" och Date.parse misslyckas.
-// Vi tar bort ALLA mellanslag före parsning och normaliserar sedan +0200 -> +02:00.
+// Vi byter första mellanslaget mot T och tar sedan bort alla kvarvarande
+// mellanslag, därefter normaliserar vi +0200 -> +02:00.
 function parseSwedishTime(s) {
   const raw = String(s ?? '').trim();
   if (!raw) return NaN;
-  let iso = raw.replace(/\s+/g, '');               // ta bort ALLA mellanslag
-  iso = iso.replace(/T(\d{2}):?(\d{2})$/, 'T$1:$2'); // normalisera "T171038" -> "T17:10:38"
-  iso = iso.replace(/([+-]\d{2}):?(\d{2})$/, '$1:$2'); // +0200 -> +02:00
+  let iso = raw.replace(' ', 'T');                 // 2026-09-22T17:10:38 +02:00
+  iso = iso.replace(/\s+/g, '');                   // 2026-09-22T17:10:38+02:00
+  iso = iso.replace(/([+-]\d{2}):?(\d{2})$/, '$1:$2'); // +0200 -> +02:00 (redan +02:00 => oförändrat)
   const parsed = Date.parse(iso);
   if (Number.isFinite(parsed)) return parsed;
   // Sista tillfället: utan tidszon (tolkas som lokal tid)
