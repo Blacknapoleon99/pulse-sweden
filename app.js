@@ -35,6 +35,7 @@ const state = {
   showPoliceAreas: true,
   nearbyPoint: null,
   nearbyLabel: '',
+  nearbyShelters: [],
   policeStations: [],
   routeFollowActive: false,
   routeFollowWatch: null,
@@ -191,6 +192,12 @@ function setActiveTab(tabKey, updateHistory = true) {
   $('#sidebar').scrollTop = 0;
   setMobileView(tabKey === 'karta');
   state.activeTab = tabKey;
+  if (tabKey === 'nara' && state.nearbyPoint) {
+    map.setView([state.nearbyPoint.lat, state.nearbyPoint.lon], 13);
+    renderNearbyMap(state.nearbyPoint, state.nearbyShelters);
+  } else {
+    nearbyLayer.clearLayers();
+  }
 
   // Uppdatera nav-knappar
   $$('.nav-tab').forEach(tab => {
@@ -1686,8 +1693,10 @@ function setupNearbySearch() {
   const saved = (() => { try { return JSON.parse(localStorage.getItem('tryggpuls_nearby_place') || 'null'); } catch { return null; } })();
   const choosePlace = (point, label, remember) => {
     state.nearbyPoint = point; state.nearbyLabel = label;
-    renderNearbyMap(point, []);
-    map.setView([point.lat, point.lon], 13);
+    if (state.activeTab === 'nara') {
+      renderNearbyMap(point, state.nearbyShelters);
+      map.setView([point.lat, point.lon], 13);
+    }
     $('#nearby-place-label').textContent = `Vald plats: ${label}${point.gps ? ' · GPS, endast i den här sessionen' : ''}`;
     $('#btn-nearby-refresh').hidden = false;
     if (remember) { try { localStorage.setItem('tryggpuls_nearby_place', JSON.stringify({ lat: point.lat, lon: point.lon, name: label })); } catch {} }
@@ -1761,7 +1770,8 @@ async function refreshNearby() {
   state.policeStations = (stationsData.items || []).map(station => ({ ...station, distance: nearbyDistanceMeters(point, { lat: station.lat, lon: station.lon }) })).sort((a, b) => a.distance - b.distance).slice(0, 3);
   const sheltersData = data[shelterUrl] || { items: [], stale: true, error: 'Skyddsrumsregistret kunde inte hämtas.' };
   const shelters = sheltersData.items || [];
-  renderNearbyMap(point, shelters);
+  state.nearbyShelters = shelters;
+  if (state.activeTab === 'nara') renderNearbyMap(point, shelters);
   const sourceLabels = { '/api/events': 'polisnotiser', '/api/weather-warnings': 'SMHI', '/api/crisis-updates': 'Krisinformation', '/api/traffic': 'Trafikverket', '/api/police-stations': 'polisstationer' };
   const sourceWarnings = urls.flatMap((url, index) => results[index].status === 'rejected' || data[url].stale ? [`${sourceLabels[url] || 'skyddsrum'}: informationen kan vara fördröjd`] : []);
   const eventCards = events.length ? events.map(event => `<article class="nearby-card"><strong>${esc(event.type)} · ${esc(event.name)}</strong><p>${esc(event.summary)}</p><small>${esc(event.location?.name || '')} · ${esc(formatSwedishTime(event.ts))} · kartpunkten anger ungefärligt område</small>${event.url ? `<a href="${esc(event.url)}" target="_blank" rel="noopener">Polisnotis ↗</a>` : ''}</article>`).join('') : '<p>Inga polisnotiser matchade den valda platsens grova område.</p>';
