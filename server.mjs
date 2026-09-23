@@ -29,6 +29,7 @@ if (!process.env.DATABASE_URL && process.env.NODE_ENV !== 'production') {
 }
 const familyApi = createFamilyApi(localFamilyPool ? { pool: localFamilyPool } : {});
 export const familyService = familyApi.service;
+let familyDbReady = false;
 
 // Fel med HTTP-statuskod, används för upström fel i /api/route och /api/geocode
 class UpstreamError extends Error {
@@ -630,7 +631,10 @@ async function calculateSafeRoute(fromLat, fromLon, toLat, toLon, mode = 'walkin
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
-  if (url.pathname.startsWith('/api/family/')) return familyApi.handle(req,res,url,fetchEvents);
+  if (url.pathname.startsWith('/api/family/')) {
+    if (!familyDbReady && familyApi.service.available) return json(req,res,503,{error:'Familjedatabasen svarar inte',code:'FAMILY_DATABASE_UNAVAILABLE'});
+    return familyApi.handle(req,res,url,fetchEvents);
+  }
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, headers('text/plain; charset=utf-8'));
@@ -665,7 +669,7 @@ export const server = http.createServer(async (req, res) => {
         name: 'TryggPuls — Sveriges Digitala Trygghetsplattform',
         version: '2.0.1',
         uptime: process.uptime(),
-        familyConfigured: familyApi.service.available,
+        familyConfigured: familyDbReady && familyApi.service.available,
         pushConfigured: familyApi.service.pushEnabled,
         noMockDataGuarantee: true
       });
@@ -815,17 +819,24 @@ export const server = http.createServer(async (req, res) => {
   }
 });
 
+async function initializeFamily() {
+  if (!familyApi.service.available) return;
+  try { await familyApi.service.init(); familyDbReady = true; }
+  catch (err) { console.error('[family] Databasen svarar inte:',err.message); }
+}
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  familyApi.service.init().then(() => {
-    server.listen(port, host, () => console.log(`TryggPuls startad: http://localhost:${server.address().port} (lyssnar på ${host})`));
-  }).catch(err => { console.error('[family] Databasen svarar inte:',err.message); process.exitCode=1; });
+  initializeFamily().finally(() => server.listen(port, host, () => console.log(`TryggPuls startad: http://localhost:${server.address().port} (lyssnar på ${host})`)));
 }
 
 let familySweepPending = false;
 setInterval(async () => {
-  if (!familyApi.service.available || familySweepPending) return;
+  if (familySweepPending) return;
   familySweepPending = true;
-  try { const result = await fetchEvents(); await familyApi.service.sweep(result.stale || !result.fetchedAt ? [] : result.events); }
+  try {
+    if (!familyDbReady) await initializeFamily();
+    if (!familyDbReady) return;
+    const result = await fetchEvents(); await familyApi.service.sweep(result.stale || !result.fetchedAt ? [] : result.events);
+  }
   catch (err) { console.error('[family] Bakgrundskontroll misslyckades:',err.message); }
   finally { familySweepPending = false; }
 },65_000).unref();
