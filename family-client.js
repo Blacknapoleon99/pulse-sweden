@@ -32,7 +32,9 @@ function renderFamilyApp() {
   window.familySharedZones = info?.zones || [];
   if (typeof renderFamilyZonesOnMap === 'function') renderFamilyZonesOnMap(false);
   if (!familyUi.config) { familyRoot.textContent = 'Familjefunktionen är inte tillgänglig.'; return; }
-  const demoNote = familyUi.config.persistent ? '' : '<p class="source-warning">Lokal testmiljö: familjekonton sparas bara tills servern startas om. Publicerad tjänst kräver en beständig databas.</p>';
+  const demoNote = familyUi.config.preview
+    ? '<p class="source-warning">Förhandsvisning: gratisdatabasen upphör efter 30 dagar och tjänsten kan vila när ingen använder den. Använd inte denna version för tidskritiska trygghetslarm.</p>'
+    : familyUi.config.persistent ? '' : '<p class="source-warning">Lokal testmiljö: familjekonton sparas bara tills servern startas om. Publicerad tjänst kräver en beständig databas.</p>';
   if (!info) {
     familyRoot.innerHTML = `${demoNote}<p>Varje medlem använder ett eget konto. En inbjudan ger tillgång till samma familj. Position delas först när personen startar den på sin egen enhet.</p>
       ${familyForm('family-register','Skapa konto',`<label>Namn<input name="name" required maxlength="80" autocomplete="name"></label><label>E-post<input name="email" type="email" required autocomplete="email"></label><label>Lösenord (minst 12 tecken)<input name="password" type="password" required minlength="12" autocomplete="new-password"></label>`,'Skapa konto')}

@@ -20,7 +20,7 @@ export function createFamilyApi(options = {}) {
   async function handle(req,res,url,getEvents) {
     try {
       if (!service.available) return reply(req,res,503,{error:'Familjekonton kräver persistent databas på servern',code:'DATABASE_NOT_CONFIGURED'});
-      if (url.pathname === '/api/family/config' && req.method === 'GET') return reply(req,res,200,{enabled:true,persistent:Boolean(process.env.DATABASE_URL),pushEnabled:service.pushEnabled,vapidPublic:service.vapidPublic});
+      if (url.pathname === '/api/family/config' && req.method === 'GET') return reply(req,res,200,{enabled:true,persistent:Boolean(process.env.DATABASE_URL),preview:process.env.FAMILY_PREVIEW_MODE==='true',pushEnabled:service.pushEnabled,vapidPublic:service.vapidPublic});
       if (['/api/family/register','/api/family/login'].includes(url.pathname)) {
         if (req.method !== 'POST') return reply(req,res,405,{error:'Metoden stöds inte'});
         const key = `${req.socket.remoteAddress}:${url.pathname}`;

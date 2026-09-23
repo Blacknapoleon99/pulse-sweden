@@ -6,7 +6,7 @@ services:
     region: oregon
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm ci --omit=dev
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeploy: true
@@ -15,3 +15,20 @@ services:
         value: "10000"
       - key: NODE_ENV
         value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tryggpuls-family
+          property: connectionString
+      - key: CARTO_BASEMAP_API_KEY
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: FAMILY_PREVIEW_MODE
+        value: "true"
+
+databases:
+  - name: tryggpuls-family
+    region: oregon
+    plan: free
