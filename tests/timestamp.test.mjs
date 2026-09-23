@@ -1,19 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-// Exakt kopia av parseSwedishTime() från server.mjs (senaste versionen med
-// fix för mellanslag före tidszon — se server.mjs:128).
-function parseSwedishTime(s) {
-  const raw = String(s ?? '').trim();
-  if (!raw) return NaN;
-  let iso = raw.replace(/\s+/g, '');
-  iso = iso.replace(/T(\d{2}):?(\d{2})$/, 'T$1:$2');
-  iso = iso.replace(/([+-]\d{2}):?(\d{2})$/, '$1:$2');
-  const parsed = Date.parse(iso);
-  if (Number.isFinite(parsed)) return parsed;
-  const stripped = Date.parse(iso.replace(/[+-]\d{2}:?\d{2}$/, ''));
-  return Number.isFinite(stripped) ? stripped : NaN;
-}
+import { parseSwedishTime } from '../server.mjs';
 
 test('parseSwedishTime: "2026-09-22 17:10:38 +02:00" (mellanlag + kolon)', () => {
   const ts = parseSwedishTime('2026-09-22 17:10:38 +02:00');
@@ -43,7 +31,7 @@ test('parseSwedishTime: "2026-09-22T17:10:38+02:00" (ISO redan)', () => {
 test('parseSwedishTime: "2026-09-22 17:10:38" (utan tidszon)', () => {
   const ts = parseSwedishTime('2026-09-22 17:10:38');
   assert.ok(Number.isFinite(ts));
-  assert.strictEqual(ts, Date.parse('2026-09-22T17:10:38.000Z'));
+  assert.strictEqual(ts, Date.parse('2026-09-22T17:10:38'));
 });
 
 test('parseSwedishTime: tom streng returnerar NaN', () => {

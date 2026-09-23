@@ -1,20 +1,34 @@
 import http from 'node:http';
+import { feeds, readCrisis, createRequestQueue } from './feeds.mjs';
+import { createFamilyApi } from './family-api.mjs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
+// Local secrets are ignored by Git. Hosting environments supply the same variables.
+try { process.loadEnvFile?.(path.join(root, '.env.local')); }
+catch (err) { if (err.code !== 'ENOENT') throw err; }
 const refreshIntervalMs = 65_000;
 const upstream = 'https://polisen.se/api/events';
 const legalUpstream = 'https://rattspraxis.etjanst.domstol.se/api/v1/publiceringar';
+const crisisApi = 'https://api.krisinformation.se/v3';
 const braPageUrl = 'https://bra.se/statistik/statistik-fran-rattsvasendet/anmalda-brott';
 const braCacheTtlMs = 24 * 60 * 60 * 1000; // 24 h
 const braRetryBackoffMs = 60_000; // nya försök 60 s efter misslyckad hämtning
-const port = Number(process.env.PORT) || 3000;
+const port = process.env.PORT === undefined ? 3000 : Number(process.env.PORT);
 // Cloud deployment (Render, etc.) kräver att servern lyssnar på en extern,
 // reachbar interface – annars kan inte health-checken eller trafiken nå den.
 const host = process.env.HOST || '0.0.0.0';
-const useragent = 'TryggPuls/2.0 (kontakta@tryggpuls.se)';
+const useragent = process.env.UPSTREAM_USER_AGENT || 'TryggPuls/2.1';
+let localFamilyPool;
+if (!process.env.DATABASE_URL && process.env.NODE_ENV !== 'production') {
+  const { newDb } = await import('pg-mem');
+  const adapter = newDb().adapters.createPg();
+  localFamilyPool = new adapter.Pool();
+}
+const familyApi = createFamilyApi(localFamilyPool ? { pool: localFamilyPool } : {});
+export const familyService = familyApi.service;
 
 // Fel med HTTP-statuskod, används för upström fel i /api/route och /api/geocode
 class UpstreamError extends Error {
@@ -57,6 +71,10 @@ async function upstreamFetch(url, timeoutMs, extraHeaders = {}) {
 
 // Officiella datakällor (publiceras via /api/sources)
 const publicSources = [
+  { id: 'weather', name: 'SMHI – varningar och meddelanden', provider: 'SMHI', scope: 'Väder, vatten och regionala varningar', refresh: 'Var 65:e sekund', detail: 'Varningsnivå, område, giltighet och råd från SMHI. Innehållet återges med källhänvisning.', url: 'https://www.smhi.se/vader/prognoser-och-varningar/varningar-och-meddelanden' },
+  { id: 'news', name: 'Krisinformation – nyheter', provider: 'Krisinformation.se', scope: 'Nationella och regionala krisnyheter senaste veckan', refresh: 'Var 5:e minut', detail: 'Separat nyhetsflöde, skilt från aktiva VMA.', url: 'https://api.krisinformation.se/v3' },
+  { id: 'preparedness', name: 'Krisinformation – förbered dig', provider: 'Krisinformation.se', scope: 'Officiella beredskapsguider', refresh: 'Varje timme', detail: 'Praktisk information om att förbereda sig för samhällsstörningar.', url: 'https://www.krisinformation.se/' },
+  { id: 'trafikverket', name: 'Trafikverket – väg och järnväg', provider: 'Trafikverket', status: 'requires_key', scope: 'Möjlig komplettering med trafikinformation', refresh: 'Ej ansluten', detail: 'Kräver registrering och en API-nyckel. Polisens trafiknotiser finns redan i kartan.', url: 'https://data.trafikverket.se/' },
   {
     id: 'polisen-events',
     name: 'Polisen öppna händelser',
@@ -66,6 +84,16 @@ const publicSources = [
     refresh: 'Var 65:e sekund',
     detail: 'Hämtas direkt via Polisens publika JSON-API med koordinater för berört område och direktlänk till polisnotisen.',
     url: 'https://polisen.se/om-polisen/om-webbplatsen/oppna-data/api-over-polisens-handelser/'
+  },
+  {
+    id: 'krisinformation-v3',
+    name: 'Krisinformation – VMA och notiser',
+    provider: 'Krisinformation.se',
+    status: 'active',
+    scope: 'Viktigt meddelande till allmänheten (VMA) och publicerade krisnotiser',
+    refresh: 'Var 65:e sekund',
+    detail: 'Visar nationella VMA och redaktionella notiser från Krisinformation.se. Innehållet länkas tillbaka till myndighetskällan.',
+    url: 'https://api.krisinformation.se/v3'
   },
   {
     id: 'bra-stat',
@@ -84,7 +112,7 @@ const publicSources = [
     status: 'active',
     scope: 'Vägnätverk, gångvägar och ruttberäkning i Sverige',
     refresh: 'On-demand beräkning',
-    detail: 'Beräknar exakta väglinjer och gångrutter för trygg rutt-analys.',
+    detail: 'Gång- och bilprofiler från FOSSGIS OSRM. Rutter visar publicerade händelser i närheten och är ingen trygghetsgaranti.',
     url: 'https://project-osrm.org/'
   },
   {
@@ -155,13 +183,13 @@ function parseSwedishTime(s) {
 
 function categorizeEvent(type) {
   const t = String(type || '').toLowerCase();
-  if (/mord|dråp|skjutning|vapen|kniv|rån|misshandel|grov|hot|våldtäkt|sexual|ofredande/i.test(t)) {
+  if (/mord|dråp|skjutning|vapen|kniv|\brån|misshandel|hot|våldtäkt|sexual|ofredande/i.test(t)) {
     return 'violence';
   }
-  if (/inbrott|stöld|bedrägeri|rattfylleri|häleri/i.test(t)) {
+  if (/inbrott|stöld|bedrägeri|häleri/i.test(t)) {
     return 'theft';
   }
-  if (/trafik|olycka|kollision|viltolycka|fordon/i.test(t)) {
+  if (/trafik|olycka|kollision|viltolycka|fordon|rattfylleri/i.test(t)) {
     return 'traffic';
   }
   if (/brand|rök|explosion/i.test(t)) {
@@ -322,6 +350,15 @@ async function fetchLegalUpdates() {
   };
 }
 
+export function clampBuffer(url) {
+  return Math.min(1000, Math.max(300, readNumberParam(url, 'buffer') || 600));
+}
+
+export { parseSwedishTime, categorizeEvent, parseBraCsv, pointToSegmentDistanceMeters, minDistanceToRouteMeters, readNumberParam };
+
+// ==== API: /api/crisis-updates — Krisinformation.se VMA och notiser ====
+const fetchCrisisUpdates = readCrisis;
+
 // ==== API: /api/bra-stats — BRÅ "Anmälda brott" (kommuner), live-pipeline ====
 let braCache = null;
 let braLastAttempt = 0;
@@ -340,7 +377,7 @@ function parseBraCsv(text) {
     if (parts.length < 3) continue;
     const name = parts[0];
     if (!name) continue;
-    if (/svrige|totalt/i.test(name)) continue; // försiktighetsåtgärd mot summarierad nationell rad
+    if (/sverige|totalt/i.test(name)) continue; // försiktighetsåtgärd mot summarierad nationell rad
     const total = Number(parts[1]);
     const per100k = Number(parts[2]);
     if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(per100k) || per100k <= 0) continue;
@@ -416,7 +453,7 @@ async function fetchBraStats() {
   if (braPending) {
     await braPending;
   } else if (
-    !braCache ||
+    (braLastAttempt === 0) ||
     Date.now() - braLastAttempt >= braCacheTtlMs ||
     (braError && Date.now() - braLastAttempt >= braRetryBackoffMs)
   ) {
@@ -489,15 +526,18 @@ function minDistanceToRouteMeters(pLat, pLon, coordinates) {
   return minDist;
 }
 
+const geocoderBase = process.env.GEOCODER_BASE_URL || 'https://nominatim.openstreetmap.org';
+const geocodeRequest = createRequestQueue(async url => (await upstreamFetch(url, 10_000)).json());
+const routeRequest = createRequestQueue(async url => (await upstreamFetch(url, 12_000)).json(), { ttl: 300_000 });
+
 // Geokodning mot Nominatim för svenska adresser och platser
 async function geocodeSwedishAddress(query) {
   if (!query || typeof query !== 'string' || query.trim().length < 2) return [];
-  const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=se&limit=5&addressdetails=1&q=${encodeURIComponent(
+  const url = `${geocoderBase}/search?format=json&countrycodes=se&limit=5&addressdetails=1&q=${encodeURIComponent(
     query.trim()
   )}`;
 
-  const response = await upstreamFetch(url, 10_000);
-  const list = await response.json();
+  const list = await geocodeRequest(url);
   if (!Array.isArray(list)) return [];
 
   return list.map(item => ({
@@ -511,11 +551,10 @@ async function geocodeSwedishAddress(query) {
 
 // Reverse-geocode: koordinater -> adress via Nominatim (backend-mediad).
 // Används av SOS-panelen för att visa en läsbar adress till enhetens position.
-// Position skickas aldrig till servern – endast för att slå upp ett gatuvisningsnamn.
+// Koordinater skickas via denna server till den konfigurerade geokodningstjänsten.
 async function reverseGeocode(lat, lon) {
-  const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
-  const response = await upstreamFetch(url, 10_000);
-  const data = await response.json();
+  const url = `${geocoderBase}/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
+  const data = await geocodeRequest(url);
   if (!data || !data.display_name) return null;
   return data.display_name;
 }
@@ -525,24 +564,25 @@ async function reverseGeocode(lat, lon) {
 // incidentanalys skulle kunna ge en falsk "trygg"-bedömning (inga mockdata,
 // inga uppfunna bedömningar).
 async function calculateSafeRoute(fromLat, fromLon, toLat, toLon, mode = 'walking', bufferMeters = 600) {
-  const osrmMode = mode === 'driving' ? 'driving' : 'walking';
-  const url = `https://router.project-osrm.org/route/v1/${osrmMode}/${fromLon},${fromLat};${toLon},${toLat}?overview=full&geometries=geojson`;
-
-  const response = await upstreamFetch(url, 12_000);
-  const data = await response.json();
+  const base = mode === 'walking'
+    ? (process.env.WALKING_ROUTER_URL || 'https://routing.openstreetmap.de/routed-foot')
+    : (process.env.DRIVING_ROUTER_URL || 'https://routing.openstreetmap.de/routed-car');
+  const url = `${base}/route/v1/driving/${fromLon},${fromLat};${toLon},${toLat}?overview=full&geometries=geojson`;
+  const data = await routeRequest(url);
   if (data.code !== 'Ok' || !data.routes || !data.routes[0]) {
     throw new Error('Ingen farbar rutt hittades mellan platserna');
   }
 
   const primaryRoute = data.routes[0];
   const coordinates = primaryRoute.geometry?.coordinates || [];
+  if (coordinates.length < 2 || !Number.isFinite(primaryRoute.distance) || !Number.isFinite(primaryRoute.duration)) throw new UpstreamError('Ofullständig rutt från källan');
 
   // Hämta aktiva händelser från cache
   const eventsResult = await fetchEvents();
   if (eventsResult.fetchedAt === null) {
     throw new UpstreamError('Incidentanalysen kan inte utföras — Polisens händelsedata svarar inte', 502);
   }
-  const allEvents = eventsResult.events || [];
+  const allEvents = (eventsResult.events || []).filter(e => e.ts >= Date.now() - 24 * 3600000);
 
   // Analysera vilka händelser som ligger inom vald säkerhetskorridor
   const incidentsNearRoute = [];
@@ -579,16 +619,18 @@ async function calculateSafeRoute(fromLat, fromLon, toLat, toLon, mode = 'walkin
     eventsFetchedAt: eventsResult.stale ? eventsResult.fetchedAt : undefined,
     assessment:
       incidentsNearRoute.length === 0
-        ? 'Inga aktiva polisanmälningar har rapporterats inom din valda säkerhetskorridor.'
+        ? 'Inga publicerade polisnotiser de senaste 24 timmarna har rapporterats inom din valda säkerhetskorridor.'
         : `Observera: ${incidentsNearRoute.length} ${
-            incidentsNearRoute.length === 1 ? 'polisanmäld händelse' : 'polisanmälda händelser'
+            incidentsNearRoute.length === 1 ? 'publicerad händelse' : 'publicerade händelser'
           } har rapporterats inom ${bufferMeters} meter från din rutt.`
   };
 }
 
 // ==== HTTP-SERVER & ROUTER ====
-const server = http.createServer(async (req, res) => {
+export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
+  if (url.pathname.startsWith('/api/family/')) return familyApi.handle(req,res,url,fetchEvents);
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405, headers('text/plain; charset=utf-8'));
@@ -597,25 +639,50 @@ const server = http.createServer(async (req, res) => {
 
   try {
     // API Endpoints
+    if (url.pathname === '/api/map-config') {
+      return json(req, res, 200, { provider: process.env.CARTO_BASEMAP_API_KEY ? 'carto' : 'openstreetmap' });
+    }
+    if (url.pathname.startsWith('/api/map-tiles/')) {
+      const match = url.pathname.match(/^\/api\/map-tiles\/(\d{1,2})\/(\d+)\/(\d+)\.png$/);
+      if (!match) return json(req, res, 400, { error: 'Ogiltig kartruta' });
+      const [z, x, y] = match.slice(1).map(Number);
+      if (z > 19 || x >= 2 ** z || y >= 2 ** z) return json(req, res, 400, { error: 'Ogiltig kartruta' });
+      if (!process.env.CARTO_BASEMAP_API_KEY) return json(req, res, 503, { error: 'CARTO är inte konfigurerad' });
+      try {
+        const tile = await upstreamFetch(`https://basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png?key=${encodeURIComponent(process.env.CARTO_BASEMAP_API_KEY)}`, 12_000, { Accept: 'image/png' });
+        if (!tile.headers.get('content-type')?.includes('image/png')) throw new Error('Invalid tile');
+        const body = Buffer.from(await tile.arrayBuffer());
+        res.writeHead(200, headers('image/png', 'public, max-age=86400'));
+        return res.end(req.method === 'HEAD' ? undefined : body);
+      } catch {
+        return json(req, res, 502, { error: 'Kartbakgrunden kunde inte hämtas' });
+      }
+    }
     if (url.pathname === '/api/health') {
       return json(req, res, 200, {
         status: 'ok',
         service: 'tryggpuls',
         name: 'TryggPuls — Sveriges Digitala Trygghetsplattform',
-        version: '2.0.0',
+        version: '2.0.1',
         uptime: process.uptime(),
-        publicDataOnly: true,
+        familyConfigured: familyApi.service.available,
+        pushConfigured: familyApi.service.pushEnabled,
         noMockDataGuarantee: true
       });
     }
 
     if (url.pathname === '/api/sources') {
       return json(req, res, 200, {
-        sources: publicSources,
+        sources: sourceStatuses(),
         updatedAt: new Date().toISOString()
       });
     }
 
+    const extraFeeds = { '/api/weather-warnings': 'weather', '/api/crisis-news': 'news', '/api/preparedness': 'preparedness' };
+    if (extraFeeds[url.pathname]) {
+      const result = await feeds[extraFeeds[url.pathname]].read();
+      return json(req, res, result.fetchedAt ? 200 : 503, result);
+    }
     if (url.pathname === '/api/events') {
       const result = await fetchEvents();
       return json(req, res, result.fetchedAt ? 200 : 503, result);
@@ -623,6 +690,11 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === '/api/legal-updates') {
       const result = await fetchLegalUpdates();
+      return json(req, res, result.fetchedAt ? 200 : 503, result);
+    }
+
+    if (url.pathname === '/api/crisis-updates') {
+      const result = await fetchCrisisUpdates();
       return json(req, res, result.fetchedAt ? 200 : 503, result);
     }
 
@@ -635,7 +707,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === '/api/geocode') {
       const q = url.searchParams.get('q');
-      if (!q) return json(req, res, 400, { error: 'Parametern "q" saknas' });
+      if (!q || q.trim().length < 2 || q.length > 200) return json(req, res, 400, { error: 'Ange en sökning med 2–200 tecken' });
       try {
         const results = await geocodeSwedishAddress(q);
         return json(req, res, 200, { query: q, results });
@@ -675,17 +747,18 @@ const server = http.createServer(async (req, res) => {
       const toLat = readNumberParam(url, 'toLat');
       const toLon = readNumberParam(url, 'toLon');
 
-      if (fromLat === null || fromLon === null || toLat === null || toLon === null) {
+      if (fromLat === null || fromLon === null || toLat === null || toLon === null || Math.abs(fromLat) > 90 || Math.abs(toLat) > 90 || Math.abs(fromLon) > 180 || Math.abs(toLon) > 180) {
         return json(req, res, 400, {
           error: 'Ogiltiga koordinater angivna (fromLat/fromLon/toLat/toLon saknas eller är ogiltiga)'
         });
       }
 
       const mode = url.searchParams.get('mode') || 'walking';
+      if (!['walking', 'driving'].includes(mode)) return json(req, res, 400, { error: 'Färdsätt måste vara walking eller driving' });
       // Säkerhetskorridor enligt spec: 300–1000 m, standard 600 m.
       // Ogiltig/utanför-intervall kläms till spec-området så analysen alltid
       // körs med en giltig corridor.
-      const bufferMeters = Math.min(1000, Math.max(300, readNumberParam(url, 'buffer') || 600));
+      const bufferMeters = clampBuffer(url);
 
       try {
         const routeResult = await calculateSafeRoute(fromLat, fromLon, toLat, toLon, mode, bufferMeters);
@@ -706,6 +779,8 @@ const server = http.createServer(async (req, res) => {
 
     // Static File Serving
     let filePath = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+    const publicFiles = ['index.html', 'app.js', 'family-client.js', 'family-sw.js', 'style.css', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', ...['layers.png', 'layers-2x.png', 'marker-icon.png', 'marker-icon-2x.png', 'marker-shadow.png'].map(name => 'vendor/leaflet/images/' + name)];
+    if (!publicFiles.includes(filePath)) return json(req, res, 404, { error: 'Sidan kunde inte hittas' });
     const safePath = path.normalize(path.join(root, filePath));
     if (!safePath.startsWith(root)) {
       res.writeHead(403, headers('text/plain; charset=utf-8'));
@@ -723,7 +798,7 @@ const server = http.createServer(async (req, res) => {
       else if (safePath.endsWith('.png')) mimeType = 'image/png';
       else if (safePath.endsWith('.jpg') || safePath.endsWith('.jpeg')) mimeType = 'image/jpeg';
 
-      res.writeHead(200, headers(mimeType, url.pathname === '/' ? 'no-store' : 'public, max-age=300'));
+      res.writeHead(200, headers(mimeType, 'no-cache'));
       res.end(req.method === 'HEAD' ? undefined : content);
     } catch (err) {
       res.writeHead(404, headers('text/plain; charset=utf-8'));
@@ -740,9 +815,20 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(port, host, () => {
-  console.log(`TryggPuls startad: http://localhost:${port} (lyssnar på ${host})`);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  familyApi.service.init().then(() => {
+    server.listen(port, host, () => console.log(`TryggPuls startad: http://localhost:${server.address().port} (lyssnar på ${host})`));
+  }).catch(err => { console.error('[family] Databasen svarar inte:',err.message); process.exitCode=1; });
+}
+
+let familySweepPending = false;
+setInterval(async () => {
+  if (!familyApi.service.available || familySweepPending) return;
+  familySweepPending = true;
+  try { const result = await fetchEvents(); await familyApi.service.sweep(result.stale || !result.fetchedAt ? [] : result.events); }
+  catch (err) { console.error('[family] Bakgrundskontroll misslyckades:',err.message); }
+  finally { familySweepPending = false; }
+},65_000).unref();
 
 // Graceful shutdown – låter pågående förfrågningar avslutas innan processen dör.
 function shutdown(signal) {
@@ -764,3 +850,16 @@ function shutdown(signal) {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+function sourceStatuses() {
+  const observed = (cache, error) => ({ status: error ? (cache ? 'stale' : 'unavailable') : cache ? 'ok' : 'not_checked', fetchedAt: cache?.fetchedAt || null });
+  const crisisStates = [feeds.vmas.snapshot(), feeds.notices.snapshot()];
+  const statuses = {
+    'polisen-events': observed(eventCache, eventError),
+    'domstolspraxis': observed(legalCache, legalError),
+    'bra-stat': observed(braCache, braError),
+    'krisinformation-v3': { status: crisisStates.some(s => s.error) ? 'stale' : crisisStates.every(s => s.fetchedAt) ? 'ok' : 'not_checked' },
+    'osrm-routing': { status: 'on_demand' }, 'nominatim-osm': { status: 'on_demand' }
+  };
+  return publicSources.map(s => ({ ...s, ...(feeds[s.id] ? observed(feeds[s.id].snapshot().fetchedAt ? feeds[s.id].snapshot() : null, feeds[s.id].snapshot().error) : statuses[s.id] || {}) }));
+}

@@ -3,78 +3,80 @@
 > *"Målet är inte att skrämma människor, utan att ge dem rätt information på rätt plats och vid rätt tid, så att de själva kan göra tryggare val."*
 > — Från grundvisionen i `VISION – TRYGGHETSPLATTFORMEN.pdf`
 
-TryggPuls är en helhetsplattform för personlig och företagsmässig säkerhet i Sverige, byggd på 100% officiella data i realtid.
+TryggPuls visar publicerade myndighetsuppgifter, historisk statistik och öppna kartdata för Sverige. Polisnotiser är ett urval; kartpunkter är ofta områdescentrum. En tom lista är ingen trygghetsgaranti. Företagsvyn innehåller tydligt märkta exempelarbetsplatser.
 
----
+## API och drift (uppdaterat 2026-09-23)
 
-## ⚡ Nyckelfunktioner (Enligt Visionen)
+Publika informationsendpoints stöder GET och HEAD. Informationsflöden anger `fetchedAt`, `stale` och felstatus. Första källfelet ger 503; finns tidigare data visas den med en fördröjningsmarkering. Delvis fel i krisflödet bevarar VMA och notiser var för sig.
 
-1. **🗺️ Karta & Händelser i Realtid**:
-   - Direktkoppling till **Polisens öppna API** (`https://polisen.se/api/events`) med automatisk synkning var 65:e sekund.
-   - Sökning på alla svenska orter, kommuner och händelsetyper.
-   - Filtrering på kategori: *Våld & Rån*, *Stöld & Inbrott*, *Trafik*, *Brand & Olycka*, samt *Övrigt*.
-   - Filter på tidsintervall: Senaste 12h, 24h, 3 dagar, eller all tillgänglig data.
-   - Klickbara markörer med klusterantal och direktlänk till den officiella polisnotisen på Polisen.se.
+| Endpoint | Innehåll / parametrar |
+| --- | --- |
+| `/api/events` | Polisens publicerade händelser, cache 65 sekunder |
+| `/api/crisis-updates` | VMA och notiser från Krisinformation v3, cache 65 sekunder |
+| `/api/weather-warnings` | SMHI:s varningar och meddelanden med nivå, område, giltighet och råd; cache 65 sekunder |
+| `/api/crisis-news` | Krisinformation, senaste veckans nyheter; cache 5 minuter |
+| `/api/preparedness` | Krisinformations beredskapsguider; cache 1 timme |
+| `/api/bra-stats` | BRÅ:s kommunstatistik, cache 24 timmar; fel återförsöks efter 60 sekunder |
+| `/api/legal-updates` | Domstolsverkets rättspraxis, cache 65 sekunder |
+| `/api/geocode?q=...` | Svensk platssökning, 2–200 tecken, explicit sökning |
+| `/api/reverse-geocode?lat=...&lon=...` | Koordinater till adress |
+| `/api/route?fromLat=...&fromLon=...&toLat=...&toLon=...&mode=walking&buffer=600` | Gång- eller bilrutt, polisnotiser från senaste 24 timmarna, korridor 300–1 000 m |
+| `/api/map-config` | Vald kartleverantör, utan API-nyckel |
+| `/api/map-tiles/{z}/{x}/{y}.png` | CARTO Voyager via servern, zoom 0–19; kräver konfigurerad nyckel |
+| `/api/sources` | Källförteckning med observerad status, tidsstämpel och källänk |
+| `/api/health` | Serverns tillgänglighet (inte en garanti att alla externa källor svarar) |
 
-2. **🚶 Trygg Rutt ("Jag ska gå hem – har något hänt längs vägen?")**:
-   - Beräknar verkliga gång- och bilvägar via **OSRM** (Open Source Routing Machine) baserat på OpenStreetMap-vägnätet.
-   - Svensk adress- och platssökning via **Nominatim**.
-   - Analyserar samtliga aktiva polisanmälningar och beräknar det exakta avståndet i meter till ruttens segment.
-   - Visar en anpassad säkerhetskorridor (300 m, 600 m eller 1 000 m) med statusindikator: *"Trygg väg"* eller *"⚠️ Händelse nära din rutt"*.
+Familje-API: `GET /api/family/config`, `GET /api/family/me` och `POST /api/family/{register,login,logout,group,invite,join,zones,location,stop,leave,push}`. Zoner, push-prenumerationer och det egna kontot kan raderas med `DELETE`. Ändringar kräver JSON, `X-TryggPuls-Action: 1`, samma ursprung och, förutom registrering/inloggning, en httpOnly sessionscookie. Inbjudningar gäller en gång i 24 timmar. Endast familjens skapare kan ändra delade zoner. Varje medlem aktiverar själv GPS på sin enhet.
 
-3. **👨‍👩‍👧‍👦 Familj & Barn (Geozoner)**:
-   - Spara skyddszoner runt platser som betyder mest: Hemmet, Skolan, Förskolan eller Träningen.
-   - Kontrollerar i realtid med Haversine-formeln om några polisanmälda händelser rapporterats inom den valda radien.
-   - Snabbindikator för zonens säkerhetsstatus (Grön / Varning).
-   - Sparas lokalt i webbläsaren (`localStorage`).
+### Konfiguration
 
-4. **🏢 Företag & Arbetsplatser (B2B Säkerhetsdashboard)**:
-   - Övervakning av incidenter i närheten av kontor, butiker och logistikanläggningar.
-   - Krisrutiner och åtgärdsplaner för:
-     - Pågående brott, hot och våld
-     - Inbrott och skadegörelse
-     - Brand och evakuering
-   - Snabbkontakt till säkerhetsansvarig, väktarbolag och SOS Alarm.
+Kopiera `.env.example` till `.env.local` för lokal körning. Filen är Git-ignorerad och läses vid start med Node 22 (eller Node 20.12+). I Render anges variablerna i tjänstens miljöinställningar.
 
-5. **📊 Platsprofil & Officiell BRÅ-kriminalstatistik**:
-   - Officiell kriminalstatistik från **Brottsförebyggande rådet (BRÅ)** för Sveriges samtliga 21 län.
-   - Jämförelse av anmälda brott per 100 000 invånare gentemot rikssnittet (14 230).
-   - Detaljerad fördelning per brottskategori: Våldsbrott & hot, Tillgreppsbrott, Skadegörelse, Trafikbrott och Narkotika.
-   - BRÅ:s officiella riskanalys och kontext för respektive region.
+- `CARTO_BASEMAP_API_KEY`: valfri kartnyckel. Den stannar på servern. Utan nyckel används OpenStreetMap; vid CARTO-fel byter kartan till OpenStreetMap.
+- `DATABASE_URL`: PostgreSQL krävs för familjekonton i produktion. Utan variabel används en tillfällig databas i lokal utveckling. Utan databas i produktion svarar familje-API med 503.
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`: behövs för Web Push. Skapa ett nyckelpar en gång och bevara det mellan distributioner, annars behöver användarna prenumerera på nytt.
+- `GEOCODER_BASE_URL`, `WALKING_ROUTER_URL`, `DRIVING_ROUTER_URL`: byt karttjänster utan kodändring.
+- `UPSTREAM_USER_AGENT`: identifiera installationen och gärna en verklig kontaktväg.
+- `PORT` och `HOST`: serverns port och bindningsadress.
 
-6. **🚨 SOS & Smarta Larm**:
-   - 1-klicks snabbval till **112** (SOS Alarm), **114 14** (Polisen icke-akut) och **1177** (Sjukvård).
-   - Hämtning av enhetens exakta satellit- och GPS-koordinater via Geolocation API.
-   - Direkt delning av koordinater och kartlänk via SMS/Meddelande.
-   - Barnanpassat nödläge (*"Jag behöver hjälp!"*) med trygg och enkel kontaktväg till föräldrar.
+Leaflet 1.9.4 levereras lokalt i `vendor/leaflet` med originallicens. Detta korrigerar det tidigare felaktiga CSS-integritetsvärdet som fick kartans rutor att visas utan rätt positionering.
 
-7. **⚖️ Rättspraxis (Domstolsverket)**:
-   - Källänkade vägledande domar och prejudikat från Domstolsverket.
+Nominatim används endast efter en uttrycklig sökning; gemensam kö begränsar uppslag till högst ett per 1,1 sekunder och återanvänder svar. Publika Nominatim tillåter inte autocomplete. Begränsningen gäller hela installationen: använd en egen eller avtalad tjänst och gemensam begränsning före skalning till flera serverinstanser. [Nominatims villkor](https://operations.osmfoundation.org/policies/nominatim/). FOSSGIS har separata riktiga gång- och bilprofiler; ruttsvaren köas och cachas. [FOSSGIS driftvillkor](https://routing.openstreetmap.de/about.html).
 
----
+Platsuppslag och rutter skickar uppgifter till respektive kartleverantör. Personliga zoner lagras i webbläsaren; delade familjezoner, konton och aviseringar lagras i PostgreSQL. Familjens exakta GPS-position visas inte för andra medlemmar; den senaste positionen används för zon- och polisnotiser i högst 15 minuter och raderas när användaren stoppar delning. Varningshistorik raderas efter sju dagar. Platsdelning kräver att medlemmen aktivt startar den i sin öppna webbläsare. En stängd webbsida kan ta emot Web Push om en aktuell position redan finns, men webbläsaren kan inte fortsätta samla GPS i bakgrunden. För kontinuerlig platsdelning när appen är stängd behövs senare en mobilapp med uttryckliga platsbehörigheter. Polisnotiser är ungefärliga, kan vara fördröjda och indikerar inte automatiskt pågående fara. Någon verifierad rikstäckande karta över platser för gängrekrytering finns inte i de anslutna källorna.
 
-## 🔒 100% Verklig Data — Noll Mock-Data
+För tillförlitlig bakgrundskontroll på Render krävs en tjänst som inte somnar, samt en beständig databas. Renders gratistjänst somnar efter 15 minuter utan trafik och gratis Postgres upphör efter 30 dagar; gratisnivån passar endast förhandsvisning. SMS/delning öppnar enhetens funktion och skickar inte automatiskt något meddelande.
 
-Plattformen följer en strikt etisk och dataskyddsmässig policy:
-- **Ingen påhittad eller fabricerad data**: All information som visas i applikationen hämtas i realtid från verifierade statliga eller öppna datakällor.
-- **Inget person- eller bostadsregister**: Vi lagrar eller publicerar aldrig uppgifter om privatpersoners bostäder eller misstänkta.
-- **Officiella källor**:
-  - Polismyndigheten: `https://polisen.se/api/events`
-  - Domstolsverket: `https://rattspraxis.etjanst.domstol.se/api/v1/publiceringar`
-  - Brottsförebyggande rådet (BRÅ): `https://bra.se/statistik`
-  - OSRM Routing: `https://project-osrm.org/`
-  - OpenStreetMap & Nominatim: `https://nominatim.org/`
+### Verifiering
 
----
+`npm run check` kontrollerar syntax. `npm test` kör deterministiska tester för riktig serverkod, HTTP-validering, skydd av privata filer, cache, källfel, partiella krisflöden, geometri och datum. Testerna startar en egen server på en ledig port och behöver inga externa tjänster.
 
-## 🚀 Kom igång och Kör
+Livekontroll 2026-09-23: Polisen, Krisinformation (VMA/notiser/nyheter/guider), SMHI, BRÅ (290 kommuner), Domstolsverket, adressuppslag, gångrutt och CARTO-rutor svarade. Tomma VMA-/nyhetsflöden är giltiga svar. Externa tjänster kan ändra tillgänglighet efter kontrollen.
 
-Kräver Node.js 20 eller senare (inga externa npm-paket krävs – applikationen körs på Node.js inbyggda moduler).
+### Ytterligare identifierad källa
 
-```bash
-# Starta servern
+Trafikverkets väg- och järnvägsinformation kräver en separat registrerad API-nyckel och är **inte ansluten**. Detta framgår även av källstatus. [Trafikverkets dataportal](https://data.trafikverket.se/). Krisinformations `/v3/notifications` stängdes 21 september 2026; appen använder de separata dokumenterade `/v3/notices`, `/v3/vmas`, `/v3/news` och `/v3/features`. [Aktuell API-dokumentation](https://api.krisinformation.se/v3).
+
+
+## Användning
+
+- Händelser: fritext, plats, tidsintervall, kategori och återställning av filter.
+- Väder & råd: sökbara varningar, krisnyheter och beredskapsguider med originalkällor.
+- Ruttanalys: sök start/mål, välj ett sökresultat och beräkna gång- eller bilväg.
+- Skyddszoner: skapa och radera egna platser som sparas lokalt.
+- Statistik: välj kommun för BRÅ:s historiska statistik.
+- SOS: telefonlänkar, position och användarstyrd delning.
+- Flikar stöder tangentbord, direktlänkar och webbläsarens tillbaka-knapp. Mobil har separata innehålls- och kartvyer.
+
+## Kör lokalt
+
+Node.js 22 rekommenderas. Kör `npm install` först.
+
+```sh
+npm install
 npm start
+npm run check
+npm test
 ```
 
-Öppna webbläsaren på:
-👉 **`http://localhost:3000`**
+Öppna [TryggPuls lokalt](http://localhost:3000). En annan port kan anges med miljövariabeln PORT.

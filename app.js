@@ -5,10 +5,23 @@ const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+function readSavedPlaces(key) {
+  try {
+    const rows = JSON.parse(localStorage.getItem(key) || 'null');
+    return Array.isArray(rows) ? rows.filter(p => p && typeof p.id === 'string' && typeof p.name === 'string' && Number.isFinite(p.lat) && Math.abs(p.lat) <= 90 && Number.isFinite(p.lon) && Math.abs(p.lon) <= 180 && Number.isFinite(p.radius) && p.radius > 0) : null;
+  } catch { return null; }
+}
+function savePlaces(key, rows) {
+  try { localStorage.setItem(key, JSON.stringify(rows)); }
+  catch { showToast('Webbläsaren kunde inte spara. Platserna finns kvar tills sidan stängs.'); }
+}
+
 // ==================== APP STATE ====================
 const state = {
   activeTab: 'karta',
   events: [],
+  eventsAvailable: false,
+  eventsStale: false,
   filteredEvents: [],
   selectedEventId: null,
   activeCategory: 'all',
@@ -28,15 +41,11 @@ const state = {
   // Familj & Geozoner (Sparade i LocalStorage med verifierade svenska platser).
   // Förkonfigurerade zoner är EXEMPEL – de är inte riktiga övervakade platser.
   // Användaren kan skapa egna zoner genom att söka riktiga adresser.
-  zones: JSON.parse(localStorage.getItem('tryggpuls_zones') || 'null') || [
-    { id: 'z1', name: 'Hemmet (Exempel)', address: 'Götgatan, Södermalm, Stockholm', lat: 59.3150, lon: 18.0730, radius: 500, type: 'home', demo: true },
-    { id: 'z2', name: 'Skolan (Exempel)', address: 'Norra Real, Norrmalm, Stockholm', lat: 59.3450, lon: 18.0600, radius: 400, type: 'school', demo: true },
-    { id: 'z3', name: 'Träningen (Exempel)', address: 'Eriksdalsbadet, Södermalm, Stockholm', lat: 59.3050, lon: 18.0750, radius: 500, type: 'sport', demo: true }
-  ],
+  zones: readSavedPlaces('tryggpuls_zones') || [],
 
   // Företag / Arbetsplatser B2B.
   // Dessa är DEMO-exempel, inte riktiga kunddata eller faktiska arbetsplatser.
-  workplaces: JSON.parse(localStorage.getItem('tryggpuls_workplaces') || 'null') || [
+  workplaces: readSavedPlaces('tryggpuls_workplaces') || [
     { id: 'w1', name: 'Huvudkontor (Demoarbetsplats)', address: 'Klarabergsviadukten 70, Stockholm', lat: 59.3305, lon: 18.0570, radius: 1000, demo: true },
     { id: 'w2', name: 'Regionkontor Väst (Demoarbetsplats)', address: 'Nordstan, Göteborg', lat: 57.7089, lon: 11.9700, radius: 1000, demo: true },
     { id: 'w3', name: 'Butik Malmö City (Demoarbetsplats)', address: 'Södergatan, Malmö', lat: 55.6040, lon: 13.0010, radius: 800, demo: true }
@@ -51,12 +60,27 @@ const map = L.map('map', {
 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-// Skarpa, infödda mörka kartrutor från CartoDB Dark Matter (inga CSS-filter som förstör plattorna)
-const tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+// Default fallback works without credentials; CARTO requests keep the key on the server.
+const tileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19,
   subdomains: 'abcd',
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a> | Polisen.se'
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | <a href="https://www.openstreetmap.org/fixthemap">Förbättra kartan</a> | Rutter: FOSSGIS OSRM'
 }).addTo(map);
+
+fetch('/api/map-config').then(response => response.json()).then(config => {
+  if (config.provider !== 'carto') return;
+  const carto = L.tileLayer('/api/map-tiles/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a> | <a href="https://www.openstreetmap.org/fixthemap">Förbättra kartan</a> | Rutter: FOSSGIS OSRM'
+  });
+  let failed = false;
+  carto.on('tileerror', () => {
+    if (failed) return;
+    failed = true; map.removeLayer(carto); tileLayer.addTo(map);
+    showToast('CARTO svarar inte. Visar OpenStreetMap som reservkarta.');
+  });
+  map.removeLayer(tileLayer); carto.addTo(map);
+}).catch(() => {});
 
 // Fallback till OpenStreetMap om CartoDB skulle blockeras.
 // VIKTIGT: exakt EN GÅNG. Utan flagga skulle VARJE enskild tileerror lägga
@@ -66,10 +90,7 @@ let basemapFallbackUsed = false;
 tileLayer.on('tileerror', () => {
   if (basemapFallbackUsed) return;
   basemapFallbackUsed = true;
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 18,
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(map);
+  showToast('Kartbakgrunden kunde inte hämtas. Händelser och information finns kvar i listan.');
 });
 
 // Säkerställ att kartans dimensioner ritas om så att inga tomma/grå rutor uppstår:
@@ -83,6 +104,9 @@ window.addEventListener('resize', () => map.invalidateSize());
 window.addEventListener('load', () => map.invalidateSize());
 if (typeof ResizeObserver !== 'undefined') {
   new ResizeObserver(() => map.invalidateSize()).observe(document.getElementById('map'));
+  new ResizeObserver(entries => {
+    document.documentElement.style.setProperty('--header-height', `${entries[0].target.getBoundingClientRect().height}px`);
+  }).observe(document.querySelector('body > header'));
 }
 
 // Kartlager
@@ -148,7 +172,12 @@ function showToast(msg) {
 }
 
 // ==================== FLIKHANTERING ====================
-function setActiveTab(tabKey) {
+function setActiveTab(tabKey, updateHistory = true) {
+  if (tabKey.startsWith('familj-invite=')) tabKey = 'familj';
+  if (!document.getElementById('panel-' + tabKey)) tabKey = 'karta';
+  if (updateHistory && location.hash !== '#' + tabKey) history.pushState(null, '', '#' + tabKey);
+  $('#sidebar').scrollTop = 0;
+  setMobileView(false);
   state.activeTab = tabKey;
 
   // Uppdatera nav-knappar
@@ -156,6 +185,7 @@ function setActiveTab(tabKey) {
     const isActive = tab.dataset.tab === tabKey;
     tab.classList.toggle('active', isActive);
     tab.setAttribute('aria-selected', isActive);
+    tab.tabIndex = isActive ? 0 : -1;
   });
 
   // Uppdatera sidopaneler
@@ -165,9 +195,10 @@ function setActiveTab(tabKey) {
 
   // Uppdatera kartans flytande rubrik
   const bannerTitles = {
-    karta: { eyebrow: 'REALTIDSLÄGE', title: state.selectedRegion || 'Hela Sverige', sub: 'Visar aktuella polisanmälningar från Polisen.se' },
+    information: { eyebrow: 'VÄDER & BEREDSKAP', title: 'Myndighetsinformation', sub: 'Varningar och råd för hela Sverige' },
+    karta: { eyebrow: 'REALTIDSLÄGE', title: state.selectedRegion || 'Hela Sverige', sub: 'Visar aktuella polisnotiser från Polisen.se' },
     rutt: { eyebrow: 'TRYGG RUTT', title: 'Ruttanalys', sub: 'Visar planerad rutt och säkerhetskorridor' },
-    familj: { eyebrow: 'FAMILJ & BARN', title: 'Skyddszoner', sub: 'Visar övervakade zoner runt hem och skola' },
+    familj: { eyebrow: 'FAMILJ & PLATSER', title: 'Familj & zoner', sub: 'Egna platser och frivilligt delade familjezoner' },
     foretag: { eyebrow: 'FÖRETAG B2B', title: 'Arbetsplatser & Verksamhet', sub: 'Incidentbevakning runt företagets anläggningar' },
     bra: { eyebrow: 'OFFICIELL STATISTIK', title: 'BRÅ Platsprofil', sub: 'Kriminalstatistik per 100 000 invånare' },
     sos: { eyebrow: 'NÖDLÄGE', title: 'SOS & Position', sub: 'Akut assistans och GPS-koordinater' }
@@ -185,6 +216,7 @@ function setActiveTab(tabKey) {
 
 function updateMapLayersForTab() {
   $('#incident-detail').hidden = true;
+  markersLayer.clearLayers(); routeLayer.clearLayers(); zonesLayer.clearLayers();
 
   if (state.activeTab === 'karta') {
     renderMapIncidents();
@@ -226,12 +258,17 @@ function filterIncidents() {
   });
 
   $('#karta-count').textContent = state.filteredEvents.length;
+  $('#filter-summary').textContent = `${state.filteredEvents.length} av ${state.events.length} notiser · ${state.periodHours ? state.periodHours + ' timmar' : 'alla tider'}`;
   renderIncidentFeed();
   renderMapIncidents();
 }
 
 function renderIncidentFeed() {
   const feed = $('#karta-feed');
+  if (!state.eventsAvailable) {
+    feed.innerHTML = '<p class="feed-status">Händelsedata saknas ännu. Använd Uppdatera eller försök igen om en stund.</p>';
+    return;
+  }
   if (!state.filteredEvents.length) {
     feed.innerHTML = `
       <div style="padding: 24px 12px; text-align: center; color: var(--text-dim); font-size: 12px;">
@@ -249,7 +286,7 @@ function renderIncidentFeed() {
   };
 
   feed.innerHTML = state.filteredEvents.slice(0, 100).map(e => `
-    <article class="incident-card ${state.selectedEventId === e.id ? 'selected' : ''}" data-id="${e.id}">
+    <article tabindex="0" role="button" aria-label="${esc(e.name)}" class="incident-card ${state.selectedEventId === e.id ? 'selected' : ''}" data-id="${e.id}">
       <div class="card-icon ${e.category}">${categoryIcons[e.category] || '📍'}</div>
       <div class="card-content">
         <div class="card-meta">
@@ -305,6 +342,7 @@ function renderMapIncidents() {
 }
 
 function showIncidentDetail(id) {
+  setMobileView(true);
   const event = state.events.find(e => e.id === id);
   if (!event) return;
 
@@ -355,51 +393,8 @@ function setupRouteSearch() {
   const fromSuggestions = $('#route-from-suggestions');
   const toSuggestions = $('#route-to-suggestions');
 
-  let debounceTimer = null;
-  function handleInput(input, suggestionsBox, onSelect) {
-    input.addEventListener('input', () => {
-      clearTimeout(debounceTimer);
-      const query = input.value.trim();
-      if (query.length < 2) {
-        suggestionsBox.hidden = true;
-        return;
-      }
-      debounceTimer = setTimeout(async () => {
-        try {
-          const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`);
-          const data = await res.json();
-          if (data.results && data.results.length) {
-            suggestionsBox.innerHTML = data.results.map(r => `
-              <div class="suggestion-item" data-lat="${r.lat}" data-lon="${r.lon}" data-name="${esc(r.displayName)}">
-                ${esc(r.displayName)}
-              </div>
-            `).join('');
-            suggestionsBox.hidden = false;
-          } else {
-            suggestionsBox.hidden = true;
-          }
-        } catch {
-          suggestionsBox.hidden = true;
-        }
-      }, 300);
-    });
-
-    suggestionsBox.addEventListener('click', e => {
-      const item = e.target.closest('.suggestion-item');
-      if (!item) return;
-      const point = {
-        name: item.dataset.name,
-        lat: Number(item.dataset.lat),
-        lon: Number(item.dataset.lon)
-      };
-      input.value = point.name;
-      suggestionsBox.hidden = true;
-      onSelect(point);
-    });
-  }
-
-  handleInput(fromInput, fromSuggestions, p => { state.routeFrom = p; });
-  handleInput(toInput, toSuggestions, p => { state.routeTo = p; });
+  setupPlaceSearch(fromInput, fromSuggestions, p => { state.routeFrom = p; invalidateRoute(); });
+  setupPlaceSearch(toInput, toSuggestions, p => { state.routeTo = p; invalidateRoute(); });
 
   // GPS-knapp för startpunkt
   $('#btn-use-gps-start').addEventListener('click', () => {
@@ -407,6 +402,7 @@ function setupRouteSearch() {
       showToast('Din webbläsare stöder inte positionering.');
       return;
     }
+    state.routeFrom = null; invalidateRoute();
     fromInput.value = 'Söker din enhetsposition...';
     navigator.geolocation.getCurrentPosition(
       pos => {
@@ -427,6 +423,8 @@ function setupRouteSearch() {
   // Snabbtest-knappar
   $$('.btn-chip-demo').forEach(btn => {
     btn.addEventListener('click', async () => {
+      state.routeFrom = null; state.routeTo = null; invalidateRoute();
+      const revision = routeRevision;
       fromInput.value = btn.dataset.from;
       toInput.value = btn.dataset.to;
       showToast(`Hämtar koordinater för ${btn.dataset.from} → ${btn.dataset.to}...`);
@@ -437,11 +435,12 @@ function setupRouteSearch() {
           fetch(`/api/geocode?q=${encodeURIComponent(btn.dataset.to)}`).then(r => r.json())
         ]);
 
+        if (revision !== routeRevision) return;
         if (rFrom.results?.[0] && rTo.results?.[0]) {
           state.routeFrom = { name: btn.dataset.from, lat: rFrom.results[0].lat, lon: rFrom.results[0].lon };
           state.routeTo = { name: btn.dataset.to, lat: rTo.results[0].lat, lon: rTo.results[0].lon };
           calculateRoute();
-        }
+        } else { showToast('Platserna kunde inte hittas. Sök start och mål manuellt.'); }
       } catch {
         showToast('Kunde inte hämta testkoordinater.');
       }
@@ -458,6 +457,8 @@ async function calculateRoute() {
     return;
   }
 
+  invalidateRoute();
+  const revision = routeRevision;
   const calcBtn = $('#btn-calculate-route');
   calcBtn.disabled = true;
   calcBtn.textContent = 'Analyserar rutt & säkerhetsläge...';
@@ -470,6 +471,7 @@ async function calculateRoute() {
     const res = await fetch(url);
     const data = await res.json();
 
+    if (revision !== routeRevision) return;
     if (!res.ok || !data.ok) {
       throw new Error(data.error || 'Kunde inte beräkna rutt');
     }
@@ -480,7 +482,7 @@ async function calculateRoute() {
     $('#btn-clear-route').hidden = false;
     showToast(`Rutt beräknad! ${data.distanceKm} km · ${data.durationMinutes} min.`);
   } catch (err) {
-    showToast(`Fel vid ruttberäkning: ${err.message}`);
+    if (revision === routeRevision) showToast(`Fel vid ruttberäkning: ${err.message}`);
   } finally {
     calcBtn.disabled = false;
     calcBtn.textContent = '🔍 Beräkna & Analysera Rutt';
@@ -502,7 +504,7 @@ function renderRouteResult(data) {
 
   $('#route-dist-label').textContent = `${data.distanceKm} km`;
   $('#route-time-label').textContent = `${data.durationMinutes} min (${data.mode === 'driving' ? 'bil' : 'gång'})`;
-  $('#route-assessment-text').textContent = data.assessment;
+  $('#route-assessment-text').textContent = data.assessment + ' Kartpunkterna är ungefärliga och visar inte exakta brottsplatser.';
   // Ärlig markering om polisens händelsedata var cachelagd/föråldrad vid analysen
   if (data.eventsStale) {
     const note = document.createElement('p');
@@ -515,7 +517,7 @@ function renderRouteResult(data) {
 
   const list = $('#route-incidents-list');
   if (data.incidentsCount === 0) {
-    list.innerHTML = `<p style="font-size: 11px; color: var(--text-dim); margin: 0;">Inga polisanmälningar inom din valda säkerhetskorridor (${data.bufferMeters}m).</p>`;
+    list.innerHTML = `<p style="font-size: 11px; color: var(--text-dim); margin: 0;">Inga polisnotiser inom din valda säkerhetskorridor (${data.bufferMeters}m).</p>`;
   } else {
     list.innerHTML = data.incidentsNearRoute.map(e => `
       <div class="route-incident-item">
@@ -529,7 +531,7 @@ function renderRouteResult(data) {
   // Faktisk information — denna analys är INTE en trygghetsgaranti.
   const disclaimer = document.createElement('p');
   disclaimer.className = 'route-disclaimer';
-  disclaimer.textContent = 'Denna analys bygger på offentliga polisanmälningar och är endast informativ. Polisen publicerar inte varje enskild händelse, och avsaknad av händelser innebär inte att en sträcka är säker. Använd omdöme och förebyggande åtgärder.';
+  disclaimer.textContent = 'Denna analys bygger på offentliga polisnotiser och är endast informativ. Polisen publicerar inte varje enskild händelse, och avsaknad av händelser innebär inte att en sträcka är säker. Använd omdöme och förebyggande åtgärder.';
   $('#route-assessment-text').appendChild(disclaimer);
 }
 
@@ -590,7 +592,18 @@ function renderRouteOnMap() {
   map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
 }
 
+let routeRevision = 0;
+function invalidateRoute() {
+  routeRevision++;
+  state.currentRouteData = null;
+  $('#route-result').hidden = true;
+  $('#btn-clear-route').hidden = true;
+  routeLayer.clearLayers();
+  corridorLine = null;
+}
+
 function clearRoute() {
+  invalidateRoute();
   state.currentRouteData = null;
   state.routeFrom = null;
   state.routeTo = null;
@@ -624,16 +637,16 @@ function renderFamilyZones() {
     const demoBadge = zone.demo ? ' <span class="demo-badge">Exempel</span>' : '';
 
     return `
-      <div class="zone-item" data-id="${zone.id}">
+      <div class="zone-item" data-id="${esc(zone.id)}">
         <div class="zone-info">
           <h4>${typeIcons[zone.type] || '📍'} ${esc(zone.name)}${demoBadge}</h4>
           <p>${esc(zone.address)} (Radie: ${zone.radius}m)</p>
-          <span class="zone-status-badge ${isSafe ? 'safe' : 'warning'}">
-            ${isSafe ? '✓ Inga rapporterade händelser i zonen' : `⚠️ ${incidentsInZone.length} rapporterad${incidentsInZone.length > 1 ? 'e händelser' : ' händelse'} i zonen`}
+          <span class="zone-status-badge ${isSafe && state.eventsAvailable && !state.eventsStale ? 'safe' : 'warning'}">
+            ${!state.eventsAvailable ? 'Händelsedata saknas' : state.eventsStale ? 'Fördröjd händelsedata – kontrollera källan' : isSafe ? '✓ Inga rapporterade händelser i zonen' : `⚠️ ${incidentsInZone.length} rapporterad${incidentsInZone.length > 1 ? 'e händelser' : ' händelse'} i zonen`}
           </span>
         </div>
         <div class="zone-actions">
-          <button class="btn-delete-zone" data-id="${zone.id}" title="Ta bort zon">🗑️</button>
+          <button class="btn-delete-zone" data-id="${esc(zone.id)}" title="Ta bort zon" aria-label="Ta bort zon ${esc(zone.name)}">🗑️</button>
         </div>
       </div>
     `;
@@ -656,7 +669,7 @@ function renderFamilyZones() {
       e.stopPropagation();
       const id = btn.dataset.id;
       state.zones = state.zones.filter(z => z.id !== id);
-      localStorage.setItem('tryggpuls_zones', JSON.stringify(state.zones));
+      savePlaces('tryggpuls_zones', state.zones);
       renderFamilyZones();
       renderFamilyZonesOnMap();
       showToast('Zon borttagen.');
@@ -664,11 +677,18 @@ function renderFamilyZones() {
   });
 }
 
-function renderFamilyZonesOnMap() {
+function renderFamilyZonesOnMap(fit = true) {
   zonesLayer.clearLayers();
   if (state.activeTab !== 'familj') return;
 
   const points = [];
+  for (const zone of window.familySharedZones || []) {
+    points.push([zone.lat, zone.lon]);
+    L.circle([zone.lat, zone.lon], {
+      radius: zone.radius, color: zone.kind === 'watch' ? '#ef4444' : '#2563eb',
+      fillColor: zone.kind === 'watch' ? '#ef4444' : '#2563eb', fillOpacity: 0.12, weight: 2
+    }).bindPopup(`<b>${esc(zone.name)}</b><br>${zone.kind === 'watch' ? 'Bevakad plats' : 'Trygg plats'} · delad familjezon`).addTo(zonesLayer);
+  }
   for (const zone of state.zones) {
     points.push([zone.lat, zone.lon]);
 
@@ -690,7 +710,7 @@ function renderFamilyZonesOnMap() {
     }).addTo(zonesLayer);
   }
 
-  if (points.length) {
+  if (fit && points.length) {
     map.fitBounds(points, { padding: [60, 60], maxZoom: 14 });
   }
 }
@@ -700,45 +720,7 @@ function setupFamilyZoneCreator() {
   const suggestionsBox = $('#zone-address-suggestions');
   let selectedPoint = null;
 
-  let timer = null;
-  addressInput.addEventListener('input', () => {
-    clearTimeout(timer);
-    const q = addressInput.value.trim();
-    if (q.length < 2) {
-      suggestionsBox.hidden = true;
-      return;
-    }
-    timer = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
-        const data = await res.json();
-        if (data.results?.length) {
-          suggestionsBox.innerHTML = data.results.map(r => `
-            <div class="suggestion-item" data-lat="${r.lat}" data-lon="${r.lon}" data-name="${esc(r.displayName)}">
-              ${esc(r.displayName)}
-            </div>
-          `).join('');
-          suggestionsBox.hidden = false;
-        } else {
-          suggestionsBox.hidden = true;
-        }
-      } catch {
-        suggestionsBox.hidden = true;
-      }
-    }, 300);
-  });
-
-  suggestionsBox.addEventListener('click', e => {
-    const item = e.target.closest('.suggestion-item');
-    if (!item) return;
-    selectedPoint = {
-      name: item.dataset.name,
-      lat: Number(item.dataset.lat),
-      lon: Number(item.dataset.lon)
-    };
-    addressInput.value = selectedPoint.name;
-    suggestionsBox.hidden = true;
-  });
+  setupPlaceSearch(addressInput, suggestionsBox, p => { selectedPoint = p; });
 
   $('#btn-add-zone').addEventListener('click', () => {
     const name = $('#zone-name').value.trim();
@@ -765,7 +747,7 @@ function setupFamilyZoneCreator() {
     };
 
     state.zones.push(newZone);
-    localStorage.setItem('tryggpuls_zones', JSON.stringify(state.zones));
+    savePlaces('tryggpuls_zones', state.zones);
 
     $('#zone-name').value = '';
     addressInput.value = '';
@@ -793,11 +775,11 @@ function renderWorkplaces() {
     const demoBadge = wp.demo ? ' <span class="demo-badge">Exempeldata</span>' : '';
 
     return `
-      <div class="workplace-card" data-id="${wp.id}">
+      <div class="workplace-card" data-id="${esc(wp.id)}">
         <div class="workplace-card-top">
           <strong>🏢 ${esc(wp.name)}${demoBadge}</strong>
-          <span class="workplace-badge ${isOk ? 'ok' : 'alert'}">
-            ${isOk ? '✓ Inga rapporterade händelser' : `⚠️ ${nearby.length} rapporterad${nearby.length > 1 ? 'e händelser' : ' händelse'}`}
+          <span class="workplace-badge ${isOk && state.eventsAvailable && !state.eventsStale ? 'ok' : 'alert'}">
+            ${!state.eventsAvailable ? 'Händelsedata saknas' : state.eventsStale ? 'Fördröjd händelsedata' : isOk ? '✓ Inga rapporterade händelser' : `⚠️ ${nearby.length} rapporterad${nearby.length > 1 ? 'e händelser' : ' händelse'}`}
           </span>
         </div>
         <p>${esc(wp.address)}</p>
@@ -808,7 +790,7 @@ function renderWorkplaces() {
 
   $('#corp-workplaces-count').textContent = state.workplaces.length;
   const threatsEl = $('#corp-active-threats');
-  threatsEl.textContent = totalThreats;
+  threatsEl.textContent = state.eventsAvailable ? totalThreats : '–';
   threatsEl.className = `corp-stat-number ${totalThreats === 0 ? 'safe' : 'text-danger'}`;
 
   container.querySelectorAll('.workplace-card').forEach(card => {
@@ -855,11 +837,13 @@ function renderWorkplacesOnMap() {
 async function loadBraStatistics() {
   try {
     const res = await fetch('/api/bra-stats');
-    state.braData = await res.json();
+    const data = await res.json();
+    if (!res.ok || !data.regions?.length) throw new Error(data.error || 'Statistiken är inte tillgänglig');
+    state.braData = data;
     populateBraRegions();
     renderBraProfile();
   } catch (err) {
-    $('#bra-stats-container').innerHTML = '<p class="error-msg">Kunde inte ladda BRÅ-statistik.</p>';
+    $('#bra-stats-container').innerHTML = '<p class="error-msg">BRÅ-statistiken kunde inte hämtas. <a href="https://bra.se/statistik" target="_blank" rel="noopener">Öppna BRÅ</a></p>';
   }
 }
 
@@ -877,7 +861,7 @@ function populateBraRegions() {
 }
 
 function renderBraProfile() {
-  if (!state.braData) return;
+  if (!state.braData?.regions?.length) return;
   const select = $('#bra-region-select');
   const regionName = select.value || (state.braData.regions && state.braData.regions[0] && state.braData.regions[0].region) || '';
   const region = state.braData.regions.find(r => r.region === regionName) || state.braData.regions[0];
@@ -978,7 +962,7 @@ function setupSosFeatures() {
         }
 
         shareBtn.disabled = false;
-        showToast('Position hämtad — lagras endast lokalt i din enhet.');
+        showToast('Position hämtad. Välj Dela för att skicka den till en kontakt.');
       },
       err => {
         coordsText.textContent = 'Kunde inte hämta position';
@@ -1010,8 +994,9 @@ function setupSosFeatures() {
 
   // Barnläge
   $('#btn-child-sos').addEventListener('click', () => {
-    const parentPhone = prompt('Ange förälders/kontaktpersons telefonnummer att larma:', '0701234567');
+    const parentPhone = prompt('Ange förälders/kontaktpersons telefonnummer att larma:', '');
     if (!parentPhone) return;
+    if (!/^\+?[0-9 ()-]{5,25}$/.test(parentPhone)) { showToast('Ange ett giltigt telefonnummer.'); return; }
 
     if (state.userCoords) {
       const [lat, lon] = state.userCoords;
@@ -1039,6 +1024,58 @@ function renderUserGpsOnMap() {
 
 // ==================== HÄMTA DATA FRÅN POLISEN ====================
 let isFetching = false;
+let isFetchingCrisis = false;
+async function refreshCrisisUpdates() {
+  if (isFetchingCrisis) return;
+  isFetchingCrisis = true;
+  const panel = $('.crisis-panel');
+  panel?.setAttribute('aria-busy', 'true');
+
+  try {
+    const res = await fetch('/api/crisis-updates');
+    const data = await res.json();
+    if (!res.ok && !data.fetchedAt) throw new Error(data.error || 'Krisinformation.se svarar inte just nu.');
+
+    const vmas = Array.isArray(data.vmas) ? data.vmas : [];
+    const notices = Array.isArray(data.notices) ? data.notices : [];
+    const items = [
+      ...vmas.map(item => ({ ...item, type: 'vma' })),
+      ...notices.map(item => ({ ...item, type: 'notice' }))
+    ];
+    $('#crisis-count').textContent = data.stale && !items.length ? '–' : String(items.length);
+    $('#crisis-updated').textContent = data.partialError
+      ? 'Delvis uppdaterad'
+      : data.stale ? 'Senaste sparade uppdateringarna'
+      : data.fetchedAt ? `Uppdaterad ${formatSwedishTime(Date.parse(data.fetchedAt))}` : 'Ingen uppdatering ännu';
+
+    if (!items.length) {
+      $('#crisis-feed').innerHTML = `<p class="crisis-empty">${data.stale ? 'En del av myndighetsinformationen kunde inte hämtas. Kontrollera källan direkt vid behov.' : 'Inga aktiva VMA eller nya krisnotiser just nu.'}</p>`;
+    } else {
+      $('#crisis-feed').innerHTML = items.map(item => {
+        const isVma = item.type === 'vma';
+        const title = esc(item.title || (isVma ? 'Viktigt meddelande till allmänheten' : 'Uppdatering från Krisinformation'));
+        const summary = esc(item.summary || 'Öppna Krisinformation.se för mer information.');
+        const area = item.area ? `<span class="crisis-area">${esc(item.area)}</span>` : '';
+        const published = item.publishedAt && Number.isFinite(Date.parse(item.publishedAt))
+          ? `<time>${esc(formatSwedishTime(Date.parse(item.publishedAt)))}</time>` : '';
+        return `<article class="crisis-card ${isVma ? 'is-vma' : ''}">
+          <div class="crisis-card-meta"><span class="crisis-kind">${isVma ? '⚠ VMA' : 'Krisnotis'}</span>${area}${published}</div>
+          <h3>${title}</h3><p>${summary}</p>
+          <a href="${esc(item.source)}" target="_blank" rel="noopener">Läs mer hos Krisinformation ↗</a>
+        </article>`;
+      }).join('');
+    }
+    if (data.stale) showToast('Krisinformationen kunde inte uppdateras. Senast hämtade uppgifter visas.');
+  } catch (err) {
+    $('#crisis-count').textContent = '–';
+    $('#crisis-updated').textContent = 'Källan svarar inte';
+    $('#crisis-feed').innerHTML = '<p class="crisis-empty">Myndighetsinformation kunde inte hämtas. Kontrollera Krisinformation.se direkt vid behov.</p>';
+  } finally {
+    panel?.setAttribute('aria-busy', 'false');
+    isFetchingCrisis = false;
+  }
+}
+
 async function refreshPoliceEvents() {
   if (isFetching) return;
   isFetching = true;
@@ -1053,6 +1090,7 @@ async function refreshPoliceEvents() {
     }
 
     state.events = data.events || [];
+    state.eventsAvailable = true; state.eventsStale = Boolean(data.stale);
     $('#status-text').textContent = data.stale ? 'Fördröjt flöde' : 'Polisen Live';
     $('#status-dot').classList.toggle('stale', data.stale);
     $('#status-updated').textContent = `Synkad ${formatSwedishTime(Date.parse(data.fetchedAt))}`;
@@ -1062,8 +1100,9 @@ async function refreshPoliceEvents() {
     const prevRegion = regionSelect.value;
     const uniqueRegions = [...new Set(state.events.map(e => e.location.name))].filter(Boolean).sort();
     
-    regionSelect.innerHTML = '<option value="">Hela Sverige (Alla län)</option>' +
+    regionSelect.innerHTML = '<option value="">Hela Sverige (alla platser)</option>' +
       uniqueRegions.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('');
+    if (prevRegion && !uniqueRegions.includes(prevRegion)) regionSelect.insertAdjacentHTML('beforeend', `<option value="${esc(prevRegion)}">${esc(prevRegion)} (inga notiser)</option>`);
     regionSelect.value = prevRegion;
 
     filterIncidents();
@@ -1074,10 +1113,14 @@ async function refreshPoliceEvents() {
       showToast('Polisens flöde är tillfälligt fördröjt. Senaste kända händelser visas.');
     }
   } catch (err) {
+    state.eventsStale = true;
+    if (!state.eventsAvailable) $('#karta-feed').innerHTML = '<p class="feed-status">Polisens flöde kunde inte hämtas. Använd ↻ Uppdatera eller försök igen senare.</p>';
+    renderFamilyZones(); renderWorkplaces();
     $('#status-text').textContent = 'Källfel';
     $('#status-dot').classList.add('stale');
     showToast('Kunde inte ansluta till Polisens öppna data. Försöker igen automatiskt.');
   } finally {
+    $('#karta-feed').setAttribute('aria-busy', 'false');
     isFetching = false;
     $('#btn-refresh').disabled = false;
   }
@@ -1098,7 +1141,9 @@ async function openSourcesModal() {
           <span class="source-badge">${esc(s.provider)}</span>
         </div>
         <p>${esc(s.detail)}</p>
+        <p class="source-status">${esc(sourceStatusLabels[s.status] || s.status)}${s.fetchedAt ? ' · ' + esc(formatSwedishTime(Date.parse(s.fetchedAt))) : ''}</p>
         <small>${esc(s.scope)} · Uppdateras: ${esc(s.refresh)}</small>
+        <a href="${esc(s.url)}" target="_blank" rel="noopener">Öppna källa ↗</a>
       </div>
     `).join('');
   } catch {
@@ -1113,8 +1158,9 @@ async function openLegalModal() {
   try {
     const res = await fetch('/api/legal-updates');
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Källan svarar inte');
     if (data.updates?.length) {
-      $('#legal-list').innerHTML = data.updates.slice(0, 10).map(item => `
+      $('#legal-list').innerHTML = (data.stale ? '<p class="data-note">Visar tidigare hämtad rättspraxis. Källan kunde inte uppdateras.</p>' : '') + data.updates.slice(0, 10).map(item => `
         <div class="legal-card">
           <div class="legal-card-header">
             <h4>${esc(item.court)}</h4>
@@ -1135,8 +1181,146 @@ async function openLegalModal() {
   }
 }
 
+// Explicit submission avoids autocomplete requests and stale selected coordinates.
+function setupPlaceSearch(input, results, onSelect) {
+  let revision = 0;
+  const search = document.createElement('button');
+  search.type = 'button'; search.className = 'btn-secondary place-search';
+  search.textContent = 'Sök plats'; search.setAttribute('aria-label', `Sök plats för ${input.id === 'route-from' ? 'startpunkt' : input.id === 'route-to' ? 'destination' : 'zon'}`);
+  input.insertAdjacentElement('afterend', search);
+  input.setAttribute('aria-controls', results.id);
+  input.setAttribute('aria-expanded', 'false');
+  input.addEventListener('input', () => { revision++; onSelect(null); results.hidden = true; input.setAttribute('aria-expanded', 'false'); });
+  const run = async () => {
+    const query = input.value.trim(), version = ++revision;
+    onSelect(null);
+    if (query.length < 2) { showToast('Skriv minst två tecken och välj Sök plats.'); return; }
+    search.disabled = true; search.textContent = 'Söker…';
+    results.hidden = false; results.textContent = 'Hämtar platser…';
+    input.setAttribute('aria-expanded', 'true');
+    try {
+      const response = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`);
+      const data = await response.json();
+      if (revision !== version) return;
+      if (!response.ok) throw new Error(data.error || 'Platsen kunde inte sökas');
+      results.innerHTML = data.results?.length ? data.results.map(p => `<button type="button" class="suggestion-item" data-lat="${p.lat}" data-lon="${p.lon}" data-name="${esc(p.displayName)}">${esc(p.displayName)}</button>`).join('') : '<p>Ingen plats hittades. Lägg till ort eller kommun och försök igen.</p>';
+    } catch (err) {
+      if (revision === version) results.textContent = `${err.message}. Försök igen.`;
+    } finally { search.disabled = false; search.textContent = 'Sök plats'; }
+  };
+  search.addEventListener('click', run);
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); run(); }
+    if (event.key === 'Escape') { revision++; results.hidden = true; input.setAttribute('aria-expanded', 'false'); }
+    if (event.key === 'ArrowDown') { event.preventDefault(); results.querySelector('button')?.focus(); }
+  });
+  results.addEventListener('click', event => {
+    const item = event.target.closest('.suggestion-item');
+    if (!item) return;
+    revision++;
+    const point = { name: item.dataset.name, lat: Number(item.dataset.lat), lon: Number(item.dataset.lon) };
+    input.value = point.name; results.hidden = true; input.setAttribute('aria-expanded', 'false');
+    onSelect(point); input.focus();
+  });
+}
+
+const sourceStatusLabels = { ok: 'Tillgänglig', stale: 'Fördröjd / delvis tillgänglig', unavailable: 'Källan svarar inte', not_checked: 'Inte hämtad ännu', on_demand: 'Hämtas vid sökning', requires_key: 'Ej ansluten · API-nyckel krävs' };
+const informationData = {};
+let informationPending = false;
+async function refreshInformation() {
+  if (informationPending) return;
+  informationPending = true;
+  $('#btn-refresh-information').disabled = true;
+  await Promise.all([
+    ['weather', '/api/weather-warnings'], ['news', '/api/crisis-news'], ['preparedness', '/api/preparedness']
+  ].map(async ([key, url]) => {
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      if (!response.ok && !data.fetchedAt) throw new Error(data.error || 'Källan svarar inte');
+      informationData[key] = data;
+    } catch (err) { informationData[key] = { ...(informationData[key] || { items: [] }), stale: true, error: err.message }; }
+    renderInformation();
+  }));
+  informationPending = false;
+  $('#btn-refresh-information').disabled = false;
+}
+
+function renderInformation() {
+  const query = $('#information-search').value.trim().toLocaleLowerCase('sv');
+  for (const key of ['weather', 'news', 'preparedness']) {
+    const data = informationData[key];
+    if (!data) continue;
+    const openIds = new Set([...document.querySelectorAll(`#${key}-feed details[open]`)].map(node => node.dataset.itemId));
+    const provider = key === 'weather' ? 'SMHI' : 'Krisinformation.se';
+    const homepage = key === 'weather' ? 'https://www.smhi.se/vader/prognoser-och-varningar/varningar-och-meddelanden' : 'https://www.krisinformation.se/';
+    const items = (data.items || []).filter(item => !query || `${item.title} ${item.area} ${item.summary || ''}`.toLocaleLowerCase('sv').includes(query));
+    const status = data.stale ? `Kunde inte uppdatera. ${data.fetchedAt ? 'Tidigare hämtad information visas.' : 'Information saknas.'}` : `Hämtad ${formatSwedishTime(Date.parse(data.fetchedAt))}`;
+    const empty = query ? 'Inga träffar. Prova en annan plats eller ett annat ämne.' : key === 'weather' ? 'Inga varningar eller meddelanden i SMHI:s aktuella svar.' : key === 'news' ? 'Inga publicerade krisnyheter den senaste veckan.' : 'Inga guider i källans svar.';
+    $(`#${key}-feed`).innerHTML = `<p class="data-note ${data.stale ? 'source-warning' : ''}">${esc(status)} · <a href="${homepage}" target="_blank" rel="noopener">${provider} ↗</a></p>` +
+      (items.length ? items.map(item => `<details data-item-id="${esc(item.id)}" ${openIds.has(String(item.id)) ? 'open' : ''} class="information-card ${key === 'weather' ? 'weather-' + esc(item.level.toLowerCase()) : ''}">
+        <summary>${key === 'weather' ? `<span class="warning-level">${esc(item.levelLabel)}</span>` : ''}<strong>${esc(item.title)}</strong>${item.area ? `<span>${esc(item.area)}</span>` : ''}</summary>
+        ${item.validFrom ? `<p class="data-note">Från ${esc(formatSwedishTime(Date.parse(item.validFrom)))}${item.validTo ? ' till ' + esc(formatSwedishTime(Date.parse(item.validTo))) : ' · tills vidare'}</p>` : ''}
+        ${item.summary ? `<p>${esc(item.summary)}</p>` : ''}
+        ${(item.descriptions || []).map(d => `<p><strong>${esc(d.title)}</strong><br>${esc(d.text)}</p>`).join('')}
+        <a href="${esc(item.source)}" target="_blank" rel="noopener">Läs hos ${provider} ↗</a>
+      </details>`).join('') : `<p class="data-note">${data.stale ? 'Kontrollera källan direkt för aktuell information.' : empty}</p>`);
+  }
+  const weather = informationData.weather;
+  if (weather) $('#weather-shortcut').textContent = weather.stale ? '☁️ Väderdata fördröjd · kontrollera SMHI →' : `☁️ ${weather.items.length} vädervarningar & meddelanden · hela Sverige →`;
+}
+
+function setupNavigation() {
+  const tabs = [...$$('.nav-tab')];
+  tabs.forEach((tab, index) => {
+    tab.id = 'tab-' + tab.dataset.tab;
+    tab.setAttribute('role', 'tab'); tab.setAttribute('aria-controls', 'panel-' + tab.dataset.tab);
+    const panel = document.getElementById('panel-' + tab.dataset.tab);
+    panel.setAttribute('role', 'tabpanel'); panel.setAttribute('aria-labelledby', tab.id);
+    tab.addEventListener('keydown', event => {
+      let next;
+      if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+      if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+      if (event.key === 'Home') next = 0;
+      if (event.key === 'End') next = tabs.length - 1;
+      if (next !== undefined) { event.preventDefault(); tabs[next].focus(); setActiveTab(tabs[next].dataset.tab); }
+    });
+  });
+  setActiveTab(location.hash.slice(1) || 'karta', false);
+  window.addEventListener('popstate', () => setActiveTab(location.hash.slice(1) || 'karta', false));
+  $$('[data-go]').forEach(button => button.addEventListener('click', () => { setActiveTab(button.dataset.go); $('#sidebar').focus(); }));
+  $('#information-search').addEventListener('input', renderInformation);
+  $('#btn-refresh-information').addEventListener('click', refreshInformation);
+  $('#btn-clear-filters').addEventListener('click', () => {
+    state.searchQuery = ''; state.selectedRegion = ''; state.periodHours = 24; state.activeCategory = 'all';
+    $('#karta-search').value = ''; $('#karta-region').value = ''; $('#karta-period').value = '24';
+    $$('#karta-categories .chip').forEach(c => { c.classList.toggle('active', c.dataset.category === 'all'); c.setAttribute('aria-pressed', c.dataset.category === 'all'); });
+    filterIncidents();
+  });
+  $$('#karta-categories .chip').forEach(c => c.setAttribute('aria-pressed', c.classList.contains('active')));
+  $('#karta-feed').addEventListener('keydown', event => {
+    if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.incident-card')) { event.preventDefault(); event.target.click(); }
+  });
+  for (const id of ['route-mode', 'route-buffer']) document.getElementById(id).addEventListener('change', invalidateRoute);
+  $('#btn-view-content').addEventListener('click', () => setMobileView(false));
+  $('#btn-view-map').addEventListener('click', () => setMobileView(true));
+}
+
+function setMobileView(showMap) {
+  document.body.classList.toggle('mobile-map', showMap);
+  $('#btn-view-content').setAttribute('aria-pressed', !showMap);
+  $('#btn-view-map').setAttribute('aria-pressed', showMap);
+  if (window.matchMedia('(max-width: 992px)').matches) window.scrollTo({ top: 0 });
+  setTimeout(() => {
+    map.invalidateSize();
+    if (showMap && state.activeTab === 'rutt' && state.currentRouteData) renderRouteOnMap();
+    if (showMap && state.activeTab === 'familj') renderFamilyZonesOnMap();
+  }, 50);
+}
+
 // ==================== INITIALISERING ====================
 function init() {
+  setupNavigation();
   // Fliknavigering
   $$('.nav-tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -1171,6 +1355,7 @@ function init() {
     if (!chip) return;
     $$('#karta-categories .chip').forEach(c => c.classList.remove('active'));
     chip.classList.add('active');
+    $('#karta-categories .chip').forEach(c => c.setAttribute('aria-pressed', c === chip));
     state.activeCategory = chip.dataset.category;
     filterIncidents();
   });
@@ -1184,7 +1369,7 @@ function init() {
   });
 
   // Kartkontroller
-  $('#btn-refresh').addEventListener('click', refreshPoliceEvents);
+  $('#btn-refresh').addEventListener('click', () => { refreshPoliceEvents(); refreshCrisisUpdates(); refreshInformation(); });
   $('#btn-reset-map').addEventListener('click', () => {
     map.setView([62.0, 15.0], 5);
     state.selectedRegion = '';
@@ -1226,7 +1411,12 @@ function init() {
 
   // Starta hämtning av Polisen data
   refreshPoliceEvents();
+  refreshCrisisUpdates();
+  refreshInformation();
+  renderFamilyZones(); renderWorkplaces();
+  setInterval(() => { if (!document.hidden) refreshInformation(); }, 65000);
   setInterval(refreshPoliceEvents, 65000);
+  setInterval(refreshCrisisUpdates, 65000);
 }
 
 // Kör init när DOM är laddad

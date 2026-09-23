@@ -1,17 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-// Exakt kopia av readNumberParam + buffer-klämning från server.mjs:120–125, 641
-function readNumberParam(url, name) {
-  const raw = url.searchParams.get(name);
-  if (raw === null || raw.trim() === '') return null;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : null;
-}
-
-function clampBuffer(raw) {
-  return Math.min(1000, Math.max(300, readNumberParam(raw, 'buffer') || 600));
-}
+import { readNumberParam, clampBuffer } from '../server.mjs';
 
 function makeUrl(qs) {
   return new URL('http://localhost/api/route?' + qs);

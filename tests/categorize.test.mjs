@@ -1,23 +1,14 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-// Exakt kopia av categorizeEvent() från server.mjs:140–155
-function categorizeEvent(type) {
-  const t = String(type || '').toLowerCase();
-  if (/mord|dråp|skjutning|vapen|kniv|rån|misshandel|grov|hot|våldtäkt|sexual|ofredande/i.test(t)) {
-    return 'violence';
-  }
-  if (/inbrott|stöld|bedrägeri|rattfylleri|häleri/i.test(t)) {
-    return 'theft';
-  }
-  if (/trafik|olycka|kollision|viltolycka|fordon/i.test(t)) {
-    return 'traffic';
-  }
-  if (/brand|rök|explosion/i.test(t)) {
-    return 'fire';
-  }
-  return 'other';
-}
+import { categorizeEvent } from '../server.mjs';
+
+test('traffic and property reports must not be mistaken for robbery', () => {
+  assert.equal(categorizeEvent('Trafikolycka, smitning från'), 'traffic');
+  assert.equal(categorizeEvent('Rattfylleri'), 'traffic');
+  assert.equal(categorizeEvent('Grov stöld'), 'theft');
+  assert.equal(categorizeEvent('Rån, försök'), 'violence');
+});
 
 test('categorizeEvent: mord -> violence', () => {
   assert.strictEqual(categorizeEvent('Mord'), 'violence');

@@ -1,27 +1,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
-// Exakt kopia av parseBraCsv() från server.mjs:316–335
-function parseBraCsv(text) {
-  const lines = String(text).replace(/^\uFEFF/, '').split(/\r?\n/);
-  const rows = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    if (/^kommun\s*;/i.test(trimmed)) continue;
-    const parts = trimmed.split(';').map(p => p.trim());
-    if (parts.length < 3) continue;
-    const name = parts[0];
-    if (!name) continue;
-    if (/svrige|totalt/i.test(name)) continue;
-    const total = Number(parts[1]);
-    const per100k = Number(parts[2]);
-    if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(per100k) || per100k <= 0) continue;
-    const population = Math.round((total * 100000) / per100k);
-    rows.push({ region: name, total, totalPer100k: per100k, population });
-  }
-  return rows;
-}
+import { parseBraCsv } from '../server.mjs';
 
 test('parseBraCsv: BOM + rubrik + data', () => {
   const csv = '\uFEFFKommun;Antal;Per 100 000 inv.\nStockholm;12345;15000\nGöteborg;9876;12000';
