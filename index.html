@@ -88,6 +88,14 @@
 
         <div class="welcome-actions"><button data-go="rutt">🚶 Planera en rutt</button><button data-go="familj">👨‍👩‍👧 Familj & platser</button><button data-go="information">☁️ Väder & beredskap</button></div>
         <p class="data-note">Polisnotiser är ett urval av händelser. Kartpunkterna anger ofta ett ungefärligt område, inte en exakt adress.</p>
+        <section class="official-areas" aria-labelledby="official-areas-title">
+          <div class="official-areas-heading"><h2 id="official-areas-title">Polisens områdesbedömning</h2><label><input id="show-police-areas" type="checkbox" checked> Visa i kartan</label></div>
+          <p id="police-areas-status" role="status">Hämtar officiella områdesgränser…</p>
+          <div class="official-areas-key"><span><i class="area-swatch exposed"></i> Utsatt område</span><span><i class="area-swatch particularly-exposed"></i> Särskilt utsatt område</span></div>
+          <label class="official-area-jump" for="police-area-jump">Hitta ett område<select id="police-area-jump" disabled><option value="">Välj ort och område…</option></select></label>
+          <p>En periodisk polisiär lägesbild, <strong>inte en karta över pågående gängrekrytering eller brott</strong>. Rekrytering kan också ske utanför de markerade områdena. <a href="https://polisen.se/om-polisen/polisens-arbete/utsatta-omraden/" target="_blank" rel="noopener">Läs Polisens lägesbild ↗</a></p>
+          <details><summary>Tillfälliga säkerhetszoner</summary><p>En säkerhetszon är ett särskilt, tidsbegränsat polisbeslut och betyder inte att området är tryggt eller farligt i varje stund. Polisen publicerar beslut med karta; det finns ingen ansluten rikstäckande gränsdata för automatiska varningar här. <a href="https://polisen.se/lagar-och-regler/sakerhetszoner/" target="_blank" rel="noopener">Så fungerar säkerhetszoner ↗</a></p></details>
+        </section>
         <div class="filters">
           <div class="search-box">
             <span class="search-icon">🔍</span>
@@ -250,7 +258,7 @@
         <details class="family-personal-zones"><summary>Egna platser i den här webbläsaren</summary>
 
         <div class="zone-creator-card">
-          <h3>Skapa ny säkerhetszon</h3>
+          <h3>Skapa en egen plats</h3>
           <div class="input-group">
             <label for="zone-name">Zonens namn:</label>
             <input type="text" id="zone-name" placeholder="T.ex. Skolan, Hemmet, Fotbollsträningen">
@@ -279,7 +287,7 @@
               </select>
             </div>
           </div>
-          <button id="btn-add-zone" class="btn-primary">+ Spara säkerhetszon</button>
+          <button id="btn-add-zone" class="btn-primary">+ Spara egen plats</button>
         </div>
 
         <div class="saved-zones-header">
@@ -464,6 +472,7 @@
 
         <div class="map-quick-actions">
           <button id="btn-my-location" class="btn-map-control" title="Hitta min position">📍 Min position</button>
+          <button id="btn-police-areas" class="btn-map-control" type="button" aria-pressed="true" title="Visa eller dölj Polisens bedömda områden">▧ Polisens områden</button>
           <button id="btn-reset-map" class="btn-map-control" title="Återställ kartvyn">🇸🇪 Hela Sverige</button>
         </div>
       </div>
@@ -482,7 +491,9 @@
         <span class="legend-item"><i class="legend-dot traffic"></i> Trafikolycka</span>
         <span class="legend-item"><i class="legend-dot fire"></i> Brand</span>
         <span class="legend-item"><i class="legend-dot other"></i> Övrigt</span>
-        <span class="legend-item"><i class="legend-dot zone"></i> Säkerhetszon</span>
+        <span class="legend-item"><i class="legend-dot zone"></i> Egen plats</span>
+        <span class="legend-item"><i class="area-swatch exposed"></i> Utsatt område</span>
+        <span class="legend-item"><i class="area-swatch particularly-exposed"></i> Särskilt utsatt</span>
       </div>
 
       <!-- DETALJPANEL VID KLICK PÅ HÄNDELSE -->

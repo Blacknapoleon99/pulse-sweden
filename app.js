@@ -32,6 +32,8 @@ const state = {
   userAddress: null,
   braData: null,
   sources: [],
+  policeAreas: null,
+  showPoliceAreas: true,
   
   // Trygg Rutt
   routeFrom: null, // { name, lat, lon }
@@ -112,6 +114,7 @@ if (typeof ResizeObserver !== 'undefined') {
 }
 
 // Kartlager
+const policeAreasLayer = L.layerGroup().addTo(map);
 const markersLayer = L.layerGroup().addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
 const zonesLayer = L.layerGroup().addTo(map);
@@ -219,6 +222,7 @@ function setActiveTab(tabKey, updateHistory = true) {
 function updateMapLayersForTab() {
   $('#incident-detail').hidden = true;
   markersLayer.clearLayers(); routeLayer.clearLayers(); zonesLayer.clearLayers();
+  renderPoliceAreasLayer();
 
   if (state.activeTab === 'karta') {
     renderMapIncidents();
@@ -602,6 +606,45 @@ function invalidateRoute() {
   $('#btn-clear-route').hidden = true;
   routeLayer.clearLayers();
   corridorLine = null;
+}
+
+function renderPoliceAreasLayer() {
+  policeAreasLayer.clearLayers();
+  if (!state.showPoliceAreas || !state.policeAreas || !['karta', 'familj'].includes(state.activeTab)) return;
+  L.geoJSON(state.policeAreas, {
+    style: feature => {
+      const particularly = feature.properties.category === 'Särskilt utsatt område';
+      return { color: particularly ? '#be4b36' : '#d1942c', weight: 2, fillColor: particularly ? '#be4b36' : '#e9b44c', fillOpacity: 0.18 };
+    },
+    onEachFeature: (feature, layer) => layer.bindPopup(`<strong>${esc(feature.properties.name)}</strong><br>${esc(feature.properties.locality)} · ${esc(feature.properties.category)}<br>Polisens lägesbild ${esc(state.policeAreas.year)}. Detta visar inte en pågående händelse.<br><a href="${esc(state.policeAreas.sourceUrl)}" target="_blank" rel="noopener">Öppna källan ↗</a>`)
+  }).addTo(policeAreasLayer);
+}
+
+function setPoliceAreasVisible(visible) {
+  state.showPoliceAreas = visible;
+  $('#show-police-areas').checked = visible;
+  $('#btn-police-areas').setAttribute('aria-pressed', String(visible));
+  renderPoliceAreasLayer();
+}
+
+async function loadPoliceAreas() {
+  try {
+    const response = await fetch('/api/police-areas');
+    if (!response.ok) throw new Error('Områdesdata saknas');
+    const data = await response.json();
+    if (data.type !== 'FeatureCollection' || !Array.isArray(data.features)) throw new Error('Ogiltiga områdesdata');
+    state.policeAreas = data;
+    const jump = $('#police-area-jump');
+    for (const feature of [...data.features].sort((a, b) => `${a.properties.locality} ${a.properties.name}`.localeCompare(`${b.properties.locality} ${b.properties.name}`, 'sv'))) {
+      jump.add(new Option(`${feature.properties.locality} · ${feature.properties.name}`, feature.id));
+    }
+    jump.disabled = false;
+    const stale = data.stale ? ' · senast sparade kopia; källkontrollen misslyckades' : '';
+    $('#police-areas-status').textContent = `${data.features.length} områden · Polisens lägesbild ${data.year}${stale}`;
+    renderPoliceAreasLayer();
+  } catch {
+    $('#police-areas-status').textContent = 'Områdesgränserna kunde inte hämtas just nu.';
+  }
 }
 
 function clearRoute() {
@@ -1371,6 +1414,15 @@ function init() {
   });
 
   // Kartkontroller
+  $('#show-police-areas').addEventListener('change', event => setPoliceAreasVisible(event.target.checked));
+  $('#btn-police-areas').addEventListener('click', () => setPoliceAreasVisible(!state.showPoliceAreas));
+  $('#police-area-jump').addEventListener('change', event => {
+    const feature = state.policeAreas?.features.find(item => item.id === event.target.value);
+    if (!feature) return;
+    setPoliceAreasVisible(true);
+    map.fitBounds(L.geoJSON(feature).getBounds(), { padding: [50, 50], maxZoom: 14 });
+    setMobileView(true);
+  });
   $('#btn-refresh').addEventListener('click', () => { refreshPoliceEvents(); refreshCrisisUpdates(); refreshInformation(); });
   $('#btn-reset-map').addEventListener('click', () => {
     map.setView([62.0, 15.0], 5);
@@ -1413,6 +1465,7 @@ function init() {
 
   // Starta hämtning av Polisen data
   refreshPoliceEvents();
+  loadPoliceAreas();
   refreshCrisisUpdates();
   refreshInformation();
   renderFamilyZones(); renderWorkplaces();

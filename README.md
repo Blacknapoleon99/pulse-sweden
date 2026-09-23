@@ -12,6 +12,7 @@ Publika informationsendpoints stöder GET och HEAD. Informationsflöden anger `f
 | Endpoint | Innehåll / parametrar |
 | --- | --- |
 | `/api/events` | Polisens publicerade händelser, cache 65 sekunder |
+| `/api/police-areas` | Polisens officiella områdesgränser i WGS84; söker ny lägesbild högst en gång per dygn när tjänsten används och markerar reservdata med `stale` |
 | `/api/crisis-updates` | VMA och notiser från Krisinformation v3, cache 65 sekunder |
 | `/api/weather-warnings` | SMHI:s varningar och meddelanden med nivå, område, giltighet och råd; cache 65 sekunder |
 | `/api/crisis-news` | Krisinformation, senaste veckans nyheter; cache 5 minuter |
@@ -27,6 +28,8 @@ Publika informationsendpoints stöder GET och HEAD. Informationsflöden anger `f
 | `/api/health` | Serverns tillgänglighet (inte en garanti att alla externa källor svarar) |
 
 Familje-API: `GET /api/family/config`, `GET /api/family/me` och `POST /api/family/{register,login,logout,group,invite,join,zones,location,stop,leave,push}`. Zoner, push-prenumerationer och det egna kontot kan raderas med `DELETE`. Ändringar kräver JSON, `X-TryggPuls-Action: 1`, samma ursprung och, förutom registrering/inloggning, en httpOnly sessionscookie. Inbjudningar gäller en gång i 24 timmar. Endast familjens skapare kan ändra delade zoner. Varje medlem aktiverar själv GPS på sin enhet.
+
+Polisens 2025-GeoJSON för bedömda utsatta områden finns som reservkopia i `data/`. Servern kontrollerar [Polisens lägesbild och geodata](https://polisen.se/om-polisen/polisens-arbete/utsatta-omraden/) efter en ny officiell version, validerar arkivet och transformerar SWEREF 99 TM till WGS84. Varje familjemedlem kan frivilligt slå på inträdesvarningar för dessa områden. Första GPS-positionen skickar inget larm; varningar kräver högst 50 meters osäkerhet, färsk källkontroll och ett nytt inträde. Högst en varning per område och dag skickas. Detta är en periodisk områdesbedömning, inte en karta över pågående gängrekrytering eller brott. Tillfälliga säkerhetszoner har separata beslut, kartor och slutdatum. Något verifierat nationellt polygon-API för dem har inte hittats, så de visas inte som automatiska GPS-zoner.
 
 ### Konfiguration
 

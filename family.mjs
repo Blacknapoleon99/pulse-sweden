@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, createHash, scrypt as callbackScrypt, timingSa
 import { promisify } from 'node:util';
 import pg from 'pg';
 import webpush from 'web-push';
+import { readPoliceAreas, areaContains } from './police-areas.mjs';
 
 const scrypt = promisify(callbackScrypt);
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -17,7 +18,7 @@ const distance = (a, b) => {
   return 6371000 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 };
 
-export function createFamilyService({ connectionString = process.env.DATABASE_URL, vapidPublic = process.env.VAPID_PUBLIC_KEY, vapidPrivate = process.env.VAPID_PRIVATE_KEY, pool: providedPool, push = webpush } = {}) {
+export function createFamilyService({ connectionString = process.env.DATABASE_URL, vapidPublic = process.env.VAPID_PUBLIC_KEY, vapidPrivate = process.env.VAPID_PRIVATE_KEY, pool: providedPool, push = webpush, areasReader = readPoliceAreas } = {}) {
   const pool = providedPool || (connectionString ? new pg.Pool({ connectionString, max: 5, connectionTimeoutMillis: 5000 }) : null);
   const available = Boolean(pool);
   const pushEnabled = Boolean(vapidPublic && vapidPrivate);
@@ -26,6 +27,7 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
   async function init() {
     if (!pool) return;
     await query(`CREATE TABLE IF NOT EXISTS family_users (id text PRIMARY KEY, email text UNIQUE NOT NULL, display_name text NOT NULL, salt text NOT NULL, password_hash text NOT NULL, family_id text, sharing boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now())`);
+    await query(`ALTER TABLE family_users ADD COLUMN IF NOT EXISTS police_area_alerts boolean NOT NULL DEFAULT false`);
     await query(`CREATE TABLE IF NOT EXISTS family_groups (id text PRIMARY KEY, name text NOT NULL, owner_id text NOT NULL)`);
     await query(`CREATE TABLE IF NOT EXISTS family_sessions (token_hash text PRIMARY KEY, user_id text NOT NULL, expires_at timestamptz NOT NULL)`);
     await query(`CREATE TABLE IF NOT EXISTS family_invites (token_hash text PRIMARY KEY, family_id text NOT NULL, expires_at timestamptz NOT NULL, used boolean NOT NULL DEFAULT false)`);
@@ -39,7 +41,7 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     if (!pool) return null;
     const value = /(?:^|;\s*)tp_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
     if (!value || value.length > 100) return null;
-    const row = (await query(`SELECT u.id,u.email,u.display_name,u.family_id,u.sharing FROM family_sessions s JOIN family_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()`, [hash(value)])).rows[0];
+    const row = (await query(`SELECT u.id,u.email,u.display_name,u.family_id,u.sharing,u.police_area_alerts FROM family_sessions s JOIN family_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()`, [hash(value)])).rows[0];
     return row || null;
   }
   async function signIn(user) {
@@ -62,7 +64,7 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     const user = (await query(`SELECT * FROM family_users WHERE email=$1`, [email])).rows[0];
     const digest = await scrypt(String(body.password || ''), user?.salt || '00000000000000000000000000000000', 64);
     if (!user || !timingSafeEqual(digest, Buffer.from(user.password_hash, 'hex'))) throw Object.assign(new Error('Fel e-post eller lösenord'), { status: 401 });
-    return { user: { id: user.id, email: user.email, display_name: user.display_name, family_id: user.family_id, sharing: user.sharing }, token: await signIn(user) };
+    return { user: { id: user.id, email: user.email, display_name: user.display_name, family_id: user.family_id, sharing: user.sharing, police_area_alerts: user.police_area_alerts }, token: await signIn(user) };
   }
   async function logout(req) {
     const value = /(?:^|;\s*)tp_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
@@ -128,6 +130,11 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     await query('DELETE FROM family_positions WHERE user_id=$1',[user.id]);
     await query('DELETE FROM family_zone_state WHERE user_id=$1',[user.id]);
   }
+  async function setPoliceAreaAlerts(user, enabled) {
+    if (typeof enabled !== 'boolean') throw Object.assign(new Error('Välj om områdesvarningar ska vara på eller av'), { status: 400 });
+    await query('UPDATE family_users SET police_area_alerts=$1 WHERE id=$2',[enabled,user.id]);
+    await query("DELETE FROM family_zone_state WHERE user_id=$1 AND zone_id LIKE 'police:%'",[user.id]);
+  }
   async function deleteAccount(user) {
     if (user.family_id) {
       const family = (await query('SELECT owner_id FROM family_groups WHERE id=$1',[user.family_id])).rows[0];
@@ -174,6 +181,32 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
       }
     }
     count += await checkReports(user, point, events);
+    if (user.police_area_alerts) count += await checkPoliceAreas(user, point);
+    return count;
+  }
+  async function checkPoliceAreas(user, point) {
+    if (point.accuracy > 50) return 0;
+    let data;
+    try { data = await areasReader(); } catch { return 0; }
+    if (data.stale) return 0;
+    const prefix = `police:${data.year}:`;
+    const baseline = `${prefix}baseline`;
+    const priorRows = (await query("SELECT zone_id FROM family_zone_state WHERE user_id=$1 AND zone_id LIKE 'police:%' AND inside=true",[user.id])).rows;
+    const initialized = priorRows.some(row => row.zone_id === baseline);
+    const prior = new Set(priorRows.map(row => row.zone_id));
+    const current = data.features.filter(feature => areaContains(feature, point.lat, point.lon));
+    const currentIds = new Set(current.map(feature => `${prefix}${feature.id}`));
+    let count = 0;
+    for (const row of priorRows) {
+      if (row.zone_id !== baseline && !currentIds.has(row.zone_id)) await query('DELETE FROM family_zone_state WHERE user_id=$1 AND zone_id=$2',[user.id,row.zone_id]);
+    }
+    for (const feature of current) {
+      const id = `${prefix}${feature.id}`;
+      if (prior.has(id)) continue;
+      await query('INSERT INTO family_zone_state(user_id,zone_id,inside) VALUES($1,$2,true) ON CONFLICT(user_id,zone_id) DO UPDATE SET inside=true',[user.id,id]);
+      if (initialized) count += Number(await alert(user,`${user.id}:${id}:${new Date().toISOString().slice(0,10)}`,'police-area',`${user.display_name}: i Polisens bedömda område`,`${feature.properties.name}, ${feature.properties.locality} · ${feature.properties.category} enligt Polisens lägesbild ${data.year}. Detta är inte en notis om pågående brott. GPS-positionen är ungefärlig.`,data.sourceUrl));
+    }
+    if (!initialized) await query('INSERT INTO family_zone_state(user_id,zone_id,inside) VALUES($1,$2,true) ON CONFLICT(user_id,zone_id) DO NOTHING',[user.id,baseline]);
     return count;
   }
   async function checkReports(user, point, events) {
@@ -213,5 +246,5 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     await query('INSERT INTO family_push(endpoint,user_id,subscription) VALUES($1,$2,$3) ON CONFLICT(endpoint) DO UPDATE SET user_id=EXCLUDED.user_id,subscription=EXCLUDED.subscription',[subscription.endpoint,user.id,subscription]);
   }
   async function unsubscribe(user, endpoint) { await query('DELETE FROM family_push WHERE user_id=$1 AND endpoint=$2',[user.id,endpoint]); }
-  return { available, pushEnabled, vapidPublic: pushEnabled ? vapidPublic : null, init, session, register, login, logout, overview, createGroup, invite, join, addZone, removeZone, leave, stop, deleteAccount, reportLocation, sweep, subscribe, unsubscribe, cookie };
+  return { available, pushEnabled, vapidPublic: pushEnabled ? vapidPublic : null, init, session, register, login, logout, overview, createGroup, invite, join, addZone, removeZone, leave, stop, setPoliceAreaAlerts, deleteAccount, reportLocation, sweep, subscribe, unsubscribe, cookie };
 }

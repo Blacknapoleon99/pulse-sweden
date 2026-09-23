@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { feeds, readCrisis, createRequestQueue } from './feeds.mjs';
 import { createFamilyApi } from './family-api.mjs';
+import { readPoliceAreas, policeAreasStatus, sourcePage as policeAreasSource } from './police-areas.mjs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,6 +73,7 @@ async function upstreamFetch(url, timeoutMs, extraHeaders = {}) {
 
 // Officiella datakällor (publiceras via /api/sources)
 const publicSources = [
+  { id: 'polisen-areas', name: 'Polisens lägesbild över utsatta områden', provider: 'Polismyndigheten', scope: 'Publicerade områdesgränser, inte pågående brott', refresh: 'Kontroll av ny geodata varje dygn', detail: 'Visar Polisens officiella GeoJSON för senaste publicerade nationella lägesbild. Bedömningen är periodisk och visar inte var rekrytering pågår just nu.', url: policeAreasSource },
   { id: 'weather', name: 'SMHI – varningar och meddelanden', provider: 'SMHI', scope: 'Väder, vatten och regionala varningar', refresh: 'Var 65:e sekund', detail: 'Varningsnivå, område, giltighet och råd från SMHI. Innehållet återges med källhänvisning.', url: 'https://www.smhi.se/vader/prognoser-och-varningar/varningar-och-meddelanden' },
   { id: 'news', name: 'Krisinformation – nyheter', provider: 'Krisinformation.se', scope: 'Nationella och regionala krisnyheter senaste veckan', refresh: 'Var 5:e minut', detail: 'Separat nyhetsflöde, skilt från aktiva VMA.', url: 'https://api.krisinformation.se/v3' },
   { id: 'preparedness', name: 'Krisinformation – förbered dig', provider: 'Krisinformation.se', scope: 'Officiella beredskapsguider', refresh: 'Varje timme', detail: 'Praktisk information om att förbereda sig för samhällsstörningar.', url: 'https://www.krisinformation.se/' },
@@ -687,6 +689,10 @@ export const server = http.createServer(async (req, res) => {
       const result = await feeds[extraFeeds[url.pathname]].read();
       return json(req, res, result.fetchedAt ? 200 : 503, result);
     }
+
+    if (url.pathname === '/api/police-areas') {
+      return json(req, res, 200, await readPoliceAreas());
+    }
     if (url.pathname === '/api/events') {
       const result = await fetchEvents();
       return json(req, res, result.fetchedAt ? 200 : 503, result);
@@ -870,6 +876,7 @@ function sourceStatuses() {
     'polisen-events': observed(eventCache, eventError),
     'domstolspraxis': observed(legalCache, legalError),
     'bra-stat': observed(braCache, braError),
+    'polisen-areas': policeAreasStatus(),
     'krisinformation-v3': { status: crisisStates.some(s => s.error) ? 'stale' : crisisStates.every(s => s.fetchedAt) ? 'ok' : 'not_checked' },
     'osrm-routing': { status: 'on_demand' }, 'nominatim-osm': { status: 'on_demand' }
   };

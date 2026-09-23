@@ -49,3 +49,23 @@ test('push subscriptions reject arbitrary network destinations', async () => {
   await service.subscribe(user, { endpoint: 'https://fcm.googleapis.com/fcm/send/example', keys: { p256dh: 'x', auth: 'y' } });
   await pool.end();
 });
+
+test('frivilliga polisområdesvarningar kräver inträde efter första GPS-positionen', async () => {
+  const pool = new (newDb().adapters.createPg().Pool)();
+  const areasReader = async () => ({ year: 2025, stale: false, sourceUrl: 'https://polisen.se/om-polisen/polisens-arbete/utsatta-omraden/', features: [
+    { id: 'test-area', properties: { name: 'Testområde', locality: 'Stockholm', category: 'Utsatt område' }, geometry: { type: 'Polygon', coordinates: [[[17.9,59.2],[18.2,59.2],[18.2,59.5],[17.9,59.5],[17.9,59.2]]] } }
+  ] });
+  const service = createFamilyService({ pool, areasReader });
+  await service.init();
+  const user = (await service.register({ email: 'area@example.test', name: 'Kim', password: 'another-long-password-123' })).user;
+  await service.createGroup(user, 'Testfamilj');
+  const activeUser = { ...user, family_id: (await pool.query('SELECT family_id FROM family_users WHERE id=$1',[user.id])).rows[0].family_id, police_area_alerts: true };
+  await service.setPoliceAreaAlerts(activeUser, true);
+  assert.equal((await service.reportLocation(activeUser,{lat:59.3,lon:18,accuracy:15})).alerts, 0);
+  assert.equal((await service.reportLocation(activeUser,{lat:59.6,lon:18,accuracy:15})).alerts, 0);
+  assert.equal((await service.reportLocation(activeUser,{lat:59.3,lon:18,accuracy:15})).alerts, 1);
+  assert.equal((await service.overview(activeUser)).alerts[0].kind, 'police-area');
+  await service.setPoliceAreaAlerts(activeUser, false);
+  assert.equal((await service.reportLocation({ ...activeUser, police_area_alerts: false },{lat:59.6,lon:18,accuracy:15})).alerts, 0);
+  await pool.end();
+});

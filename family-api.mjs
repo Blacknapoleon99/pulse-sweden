@@ -42,6 +42,7 @@ export function createFamilyApi(options = {}) {
         if (url.pathname === '/api/family/invite') return reply(req,res,200,{token:await service.invite(user)});
         if (url.pathname === '/api/family/join') { await service.join(user,data.token); return reply(req,res,200,{ok:true}); }
         if (url.pathname === '/api/family/zones') return reply(req,res,200,{id:await service.addZone(user,data)});
+        if (url.pathname === '/api/family/police-area-alerts') { await service.setPoliceAreaAlerts(user,data.enabled); return reply(req,res,200,{enabled:data.enabled}); }
         if (url.pathname === '/api/family/location') {
           const events = await getEvents();
           const policeAvailable = Boolean(events.fetchedAt && !events.stale);

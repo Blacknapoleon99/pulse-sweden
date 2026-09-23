@@ -2032,11 +2032,25 @@ input, select { min-height: 44px; font-size: 14px !important; }
 .card-meta { gap: 8px; flex-wrap: wrap; }
 .panel-header h1, .btn-subtle, .btn-primary, .btn-secondary, .chip { text-transform: none; letter-spacing: 0; }
 .family-app { display: flex; flex-direction: column; gap: 16px; }
+.official-areas { margin: 16px 0; padding: 17px; border: 1px solid var(--border-highlight); border-radius: 10px; background: var(--bg-card); }
+.official-areas-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.official-areas h2 { margin: 0; font-size: 17px; }
+.official-areas-heading label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; }
+.official-areas p { margin: 10px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.55; }
+.official-areas a { color: var(--accent-emerald); }
+.official-areas-key { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; font-size: 12px; }
+.official-areas-key span { display: inline-flex; align-items: center; gap: 6px; }
+.area-swatch { width: 13px; height: 13px; display: inline-block; border-radius: 3px; border: 2px solid #d1942c; background: #e9b44c55; }
+.area-swatch.particularly-exposed { border-color: #be4b36; background: #be4b3655; }
+.official-areas details { margin-top: 12px; font-size: 13px; }
+.official-areas summary { cursor: pointer; font-weight: 600; }
 .family-app section, .family-consent, .family-form, .family-personal-zones { padding: 18px; border: 1px solid var(--border-highlight); border-radius: 10px; background: var(--bg-card); }
 .family-app h2, .family-app h3 { margin: 0 0 10px; line-height: 1.3; }
 .family-app p, .family-app small { color: var(--text-muted); font-size: 13px; line-height: 1.6; }
 .family-app label { display: block; margin: 12px 0; font-size: 13px; font-weight: 600; }
 .family-app input, .family-app select { display: block; width: 100%; margin-top: 6px; padding: 10px; background: var(--bg-input); border: 1px solid var(--border-highlight); border-radius: 7px; }
+.family-area-toggle { display: flex !important; align-items: flex-start; gap: 9px; cursor: pointer; line-height: 1.45; }
+.family-app .family-area-toggle input { display: inline-block; width: 18px; height: 18px; flex: 0 0 18px; margin: 1px 0 0; padding: 0; }
 .family-app .btn-primary, .family-app .btn-secondary { padding: 10px 14px; margin: 6px 4px 4px 0; border-radius: 6px; }
 .family-heading { display: flex; align-items: start; justify-content: space-between; gap: 10px; }
 .family-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
