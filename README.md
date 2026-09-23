@@ -13,6 +13,7 @@ Publika informationsendpoints stöder GET och HEAD. Informationsflöden anger `f
 | --- | --- |
 | `/api/events` | Polisens publicerade händelser, cache 65 sekunder |
 | `/api/police-areas` | Polisens officiella områdesgränser i WGS84; söker ny lägesbild högst en gång per dygn när tjänsten används och markerar reservdata med `stale` |
+| `/api/security-zone-news` | Nyligen publicerade polisartiklar om säkerhetszoner från Polisens nyhets- och press-RSS, cache 30 minuter; artiklar innebär inte automatiskt en aktiv zon |
 | `/api/crisis-updates` | VMA och notiser från Krisinformation v3, cache 65 sekunder |
 | `/api/weather-warnings` | SMHI:s varningar och meddelanden med nivå, område, giltighet och råd; cache 65 sekunder |
 | `/api/crisis-news` | Krisinformation, senaste veckans nyheter; cache 5 minuter |

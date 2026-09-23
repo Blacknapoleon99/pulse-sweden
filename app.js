@@ -647,6 +647,21 @@ async function loadPoliceAreas() {
   }
 }
 
+async function loadSecurityZoneNews() {
+  const container = $('#security-zone-news');
+  try {
+    const response = await fetch('/api/security-zone-news');
+    if (!response.ok) throw new Error('RSS saknas');
+    const data = await response.json();
+    const note = '<p>Polisens nyheter är inte en förteckning över aktiva zoner. Kontrollera beslutets giltighetstid och karta hos Polisen.</p>';
+    container.innerHTML = data.items.length
+      ? `<p>${data.stale ? 'Senast sparade artiklar; källan svarar inte nu.' : 'Senaste artiklarna från Polisens RSS:'}</p>${data.items.map(item => `<article class="security-zone-news-item"><a href="${esc(item.url)}" target="_blank" rel="noopener">${esc(item.title)} ↗</a><small>${esc(formatSwedishTime(Date.parse(item.publishedAt)))}</small><p>${esc(item.summary)}</p></article>`).join('')}${note}`
+      : `<p>Inga artiklar om säkerhetszoner i Polisens senaste RSS-flöde. Det bevisar inte att ingen aktiv zon finns. <a href="https://polisen.se/aktuellt/rss/" target="_blank" rel="noopener">Om Polisens RSS ↗</a></p>${note}`;
+  } catch {
+    container.innerHTML = '<p>Polisens nyhetsflöde kunde inte kontrolleras nu. Öppna <a href="https://polisen.se/aktuellt/rss/" target="_blank" rel="noopener">Polisens RSS ↗</a>.</p>';
+  }
+}
+
 function clearRoute() {
   invalidateRoute();
   state.currentRouteData = null;
@@ -1466,12 +1481,14 @@ function init() {
   // Starta hämtning av Polisen data
   refreshPoliceEvents();
   loadPoliceAreas();
+  loadSecurityZoneNews();
   refreshCrisisUpdates();
   refreshInformation();
   renderFamilyZones(); renderWorkplaces();
   setInterval(() => { if (!document.hidden) refreshInformation(); }, 65000);
   setInterval(refreshPoliceEvents, 65000);
   setInterval(refreshCrisisUpdates, 65000);
+  setInterval(() => { if (!document.hidden) loadSecurityZoneNews(); }, 30 * 60_000);
 }
 
 // Kör init när DOM är laddad
