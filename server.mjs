@@ -10,6 +10,7 @@ import { policeApiFetch } from './police-api.mjs';
 import { createPublicZoneService } from './public-zones.mjs';
 import { findRouteZonePassages, routeSlice } from './route-analysis.mjs';
 import { readNearbyShelters, shelterSource, shelterStatus } from './shelters.mjs';
+import { createFireRiskService, sampleRouteForFireRisk, selectFireRiskPeriod, SMHI_FIRE_RISK_URL } from './fire-risk.mjs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +39,7 @@ if (!process.env.DATABASE_URL && process.env.NODE_ENV !== 'production') {
 }
 const familyApi = createFamilyApi(localFamilyPool ? { pool: localFamilyPool } : {});
 const publicZoneApi = createPublicZoneService(localFamilyPool ? { pool: localFamilyPool } : {});
+const fireRiskService = createFireRiskService();
 export const familyService = familyApi.service;
 let familyDbReady = false;
 let publicZoneDbReady = false;
@@ -86,6 +88,7 @@ const publicSources = [
   { id: 'polisen-areas', name: 'Polisens lägesbild över utsatta områden', provider: 'Polismyndigheten', scope: 'Publicerade områdesgränser, inte pågående brott', refresh: 'Senaste publicerade nationella lägesbild; kontrollera källan för nya utgåvor', detail: 'Visar Polisens officiella GeoJSON för senaste publicerade nationella lägesbild. Bedömningen är periodisk och visar inte var rekrytering pågår just nu.', url: policeAreasSource },
   { id: 'polisen-zone-news', name: 'Polisens nyheter om säkerhetszoner', provider: 'Polismyndigheten', scope: 'Nyligen publicerade artiklar, inte verifierade aktiva zoner', refresh: 'Var 30:e minut när tjänsten används', detail: 'Filtrerar Polisens officiella nyhets- och press-RSS efter säkerhetszoner. Rubriker är inga geodata eller bevis för att ett beslut fortfarande gäller.', url: 'https://polisen.se/aktuellt/rss/' },
   { id: 'weather', name: 'SMHI – varningar och meddelanden', provider: 'SMHI', scope: 'Väder, vatten och regionala varningar', refresh: 'Var 65:e sekund', detail: 'Varningsnivå, område, giltighet och råd från SMHI. Innehållet återges med källhänvisning.', url: 'https://www.smhi.se/vader/prognoser-och-varningar/varningar-och-meddelanden' },
+  { id: 'smhi-fire-risk', name: 'SMHI – brandriskprognos', provider: 'SMHI', status: fireRiskService.snapshot().status, scope: 'Timvis skogsbrandsrisk längs vald rutt', refresh: 'Prognos uppdateras ungefär varje timme; TryggPuls cachar i 20 minuter', detail: 'Punktprognos från SMHI:s modellgrid. Visas som ungefärliga provpunkter längs rutten, inte som brand- eller eldningsförbudszoner.', url: SMHI_FIRE_RISK_URL },
   { id: 'news', name: 'Krisinformation – nyheter', provider: 'Krisinformation.se', scope: 'Nationella och regionala krisnyheter senaste veckan', refresh: 'Var 5:e minut', detail: 'Separat nyhetsflöde, skilt från aktiva VMA.', url: 'https://api.krisinformation.se/v3' },
   { id: 'preparedness', name: 'Krisinformation – förbered dig', provider: 'Krisinformation.se', scope: 'Officiella beredskapsguider', refresh: 'Varje timme', detail: 'Praktisk information om att förbereda sig för samhällsstörningar.', url: 'https://www.krisinformation.se/' },
   { id: 'trafikverket', name: 'Trafikverket – väg och järnväg', provider: 'Trafikverket', scope: 'Publicerade väg- och järnvägsstörningar', refresh: 'Var 60:e sekund när tjänsten används', detail: 'Serveranslutning till Trafikverkets öppna API. Aktiva störningar längs en beräknad rutt visas när källan ger geometri.', url: 'https://www.trafikverket.se/e-tjanster/trafikverkets-oppna-api-for-trafikinformation/' },
@@ -682,6 +685,27 @@ async function calculateSafeRoute(fromLat, fromLon, toLat, toLon, mode = 'walkin
     return passages.length ? [{ id: item.id, title: item.title, area: item.area, level: item.level, levelLabel: item.levelLabel, validFrom: item.validFrom, validTo: item.validTo, source: item.source, geometry: feature.geometry, passages: passages.map(p => ({ startMeters: Math.round(p.startMeters), endMeters: Math.round(p.endMeters) })) }] : [];
   });
 
+  const fireRiskSamples = sampleRouteForFireRisk(coordinates);
+  const fireRiskResults = await Promise.all(fireRiskSamples.map(async sample => {
+    const routeProgress = Math.min(1, sample.distanceMeters / Math.max(primaryRoute.distance, 1));
+    const expectedAt = new Date(Date.now() + primaryRoute.duration * 1000 * routeProgress).toISOString();
+    const data = await fireRiskService.read(sample.lat, sample.lon, 'hourly');
+    const forecast = selectFireRiskPeriod(data.periods, expectedAt);
+    return {
+      distanceMeters: sample.distanceMeters, lat: sample.lat, lon: sample.lon,
+      expectedAt, forecast,
+      status: data.status === 'unavailable' ? 'unavailable' : forecast ? data.status : 'stale',
+      approvedAt: data.approvedAt, fetchedAt: data.fetchedAt,
+      resolutionKm: data.resolutionKm || 2.5,
+      error: data.status === 'unavailable' ? data.error : undefined
+    };
+  }));
+  const fireRiskStatus = fireRiskService.snapshot();
+  sourceStates['smhi-fire-risk'] = {
+    status: fireRiskResults.length && fireRiskResults.every(point => point.status === 'ok') ? 'ok' : fireRiskResults.some(point => ['ok', 'stale'].includes(point.status)) ? 'stale' : fireRiskStatus.status,
+    fetchedAt: fireRiskStatus.fetchedAt
+  };
+
   return {
     ok: true,
     distanceMeters: Math.round(primaryRoute.distance),
@@ -694,6 +718,7 @@ async function calculateSafeRoute(fromLat, fromLon, toLat, toLon, mode = 'walkin
     routeAreas,
     trafficNearRoute,
     weatherAlongRoute,
+    fireRiskAlongRoute: fireRiskResults,
     sourceStatus: {
       'polisen-events': { status: eventsResult.fetchedAt ? eventsResult.stale ? 'stale' : 'ok' : 'unavailable', fetchedAt: eventsResult.fetchedAt },
       ...sourceStates
@@ -778,6 +803,15 @@ export const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/traffic') {
       const result = await readTraffic();
       return json(req, res, result.fetchedAt || result.status === 'requires_key' ? 200 : 503, result);
+    }
+    if (url.pathname === '/api/fire-risk') {
+      const lat = readNumberParam(url, 'lat');
+      const lon = readNumberParam(url, 'lon');
+      if (lat === null || lon === null || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        return json(req, res, 400, { error: 'Ogiltiga koordinater (lat/lon)' });
+      }
+      const result = await fireRiskService.read(lat, lon, 'hourly');
+      return json(req, res, result.status === 'unavailable' ? 503 : 200, result);
     }
     if (url.pathname === '/api/police-stations') {
       const result = await readPoliceStations();
@@ -994,6 +1028,7 @@ function sourceStatuses() {
     'polisen-zone-news': zoneNewsStatus(),
     'krisinformation-v3': { status: crisisStates.some(s => s.error) ? 'stale' : crisisStates.every(s => s.fetchedAt) ? 'ok' : 'not_checked', fetchedAt: crisisStates.map(s => s.fetchedAt).filter(Boolean).sort()[0] || null },
     'civil-shelters': shelterStatus(),
+    'smhi-fire-risk': fireRiskService.snapshot(),
     trafikverket: trafficStatus(), 'polisen-stations': policeStationsStatus(),
     'reviewed-zones': { status: publicZoneApi.available && publicZoneDbReady ? 'on_demand' : 'unavailable', fetchedAt: null },
     'osrm-routing': { status: 'on_demand' }, 'nominatim-osm': { status: 'on_demand' }

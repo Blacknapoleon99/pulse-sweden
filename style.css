@@ -2187,6 +2187,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .route-detail-section h4 { margin-bottom: 8px; }
 .route-zone-item, .nearby-card, .route-incident-item { margin: 9px 0; padding: 13px; border: 1px solid var(--border-color); border-radius: 12px; background: #fff; }
 .route-zone-item a, .nearby-card a { display: inline-block; margin-top: 6px; }
+.route-fire-risk-item strong { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.fire-risk-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 9px; color: #fff; font-size: 12px; font-weight: 700; line-height: 1.25; }
+.fire-risk-0 { background: #64748b; }
+.fire-risk-1 { background: #2f7ea1; }
+.fire-risk-2 { background: #087f76; }
+.fire-risk-3 { background: #80620b; }
+.fire-risk-4 { background: #a94c00; }
+.fire-risk-5 { background: #ad3823; }
+.fire-risk-6 { background: #7f1d2d; }
 .route-source-status, .route-follow-status, .nearby-updated { color: var(--text-muted); font-size: 13px; }
 .source-warning { color: #805411 !important; background: #fff5df; border-radius: 9px; padding: 8px 10px; }
 .nearby-search-card { padding: 16px; }

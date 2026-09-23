@@ -31,9 +31,10 @@ test('HTTP routing, input validation, health, HEAD and private files', async () 
     assert.equal(health.service, 'tryggpuls');
     const sources = await (await fetch(base + '/api/sources')).json();
     assert.ok(sources.sources.some(s => s.id === 'weather'));
+    assert.ok(sources.sources.some(s => s.id === 'smhi-fire-risk'));
     assert.ok(sources.sources.some(s => s.id === 'civil-shelters'));
     assert.equal(sources.sources.find(s => s.id === 'trafikverket').status, 'requires_key');
-    for (const url of ['/api/route', '/api/route?fromLat=99&fromLon=18&toLat=59&toLon=18', '/api/route?fromLat=59&fromLon=18&toLat=59&toLon=18&mode=flying', '/api/geocode?q=a', '/api/reverse-geocode?lat=&lon=18', '/api/shelters?lat=99&lon=18']) {
+    for (const url of ['/api/route', '/api/route?fromLat=99&fromLon=18&toLat=59&toLon=18', '/api/route?fromLat=59&fromLon=18&toLat=59&toLon=18&mode=flying', '/api/geocode?q=a', '/api/reverse-geocode?lat=&lon=18', '/api/shelters?lat=99&lon=18', '/api/fire-risk', '/api/fire-risk?lat=91&lon=18', '/api/fire-risk?lat=59&lon=']) {
       assert.equal((await fetch(base + url)).status, 400, url);
     }
     for (const url of ['/api/missing', '/server.mjs', '/feeds.mjs', '/family.mjs', '/family-api.mjs', '/package.json', '/.git/config', '/.env.local']) {

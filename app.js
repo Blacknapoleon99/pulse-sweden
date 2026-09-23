@@ -4,6 +4,7 @@
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const SMHI_FIRE_RISK_SOURCE_URL = 'https://www.smhi.se/data/temperatur-och-vind/brandrisk';
 
 function readSavedPlaces(key) {
   try {
@@ -562,6 +563,14 @@ function renderRouteResult(data) {
   $('#route-traffic-list').innerHTML = traffic.length ? traffic.map(item => `<article class="route-zone-item"><strong>${esc(item.title)}</strong><p>${esc(item.description || item.location || '')}${item.road ? ` · ${esc(item.road)}` : ''}${item.severity ? ` · ${esc(item.severity)}` : ''}</p><small>${item.modifiedAt ? `Uppdaterad ${esc(formatSwedishTime(Date.parse(item.modifiedAt)))}` : 'Publicerad trafikinformation'} · kartläge kan vara ungefärligt</small><a href="${esc(item.source)}" target="_blank" rel="noopener">Trafikverket ↗</a></article>`).join('') : '<p>Inga matchande trafikstörningar hittades eller så saknas precis geometri i källan.</p>';
   const weather = data.weatherAlongRoute || [];
   $('#route-weather-list').innerHTML = weather.length ? weather.map(item => `<article class="route-zone-item"><strong>${esc(item.levelLabel)} · ${esc(item.title)}</strong><p>${esc(item.area || '')}${item.validTo ? ` · till ${esc(formatSwedishTime(Date.parse(item.validTo)))}` : ''}</p><a href="${esc(item.source)}" target="_blank" rel="noopener">Läs SMHI:s varning ↗</a></article>`).join('') : '<p>Inga geografiskt matchande SMHI-varningar hittades i aktuella data.</p>';
+  const fireRisk = data.fireRiskAlongRoute || [];
+  $('#route-fire-risk-list').innerHTML = fireRisk.length ? fireRisk.map(point => {
+    if (!point.forecast) return `<article class="route-zone-item route-fire-risk-item"><strong>Brandriskprognos saknas vid ${(point.distanceMeters / 1000).toFixed(1)} km</strong><p>${point.status === 'unavailable' ? 'SMHI:s källa kunde inte nås.' : 'Ingen timprognos finns nära den beräknade passagetiden.'}${point.approvedAt ? ` Senaste prognoskörning ${esc(formatSwedishTime(Date.parse(point.approvedAt)))}.` : ''}</p></article>`;
+    const forecast = point.forecast;
+    const riskClass = forecast.riskClass || 0;
+    const conditions = [forecast.temperatureC === null ? '' : `${forecast.temperatureC} °C`, forecast.windMetersPerSecond === null ? '' : `${forecast.windMetersPerSecond} m/s vind`, forecast.humidityPercent === null ? '' : `${forecast.humidityPercent} % luftfuktighet`].filter(Boolean).join(' · ');
+    return `<article class="route-zone-item route-fire-risk-item"><strong>Vid ${(point.distanceMeters / 1000).toFixed(1)} km <span class="fire-risk-badge fire-risk-${riskClass}">${esc(forecast.riskLabel)} brandrisk</span></strong><p>${forecast.validTime ? `Prognos för ${esc(formatSwedishTime(Date.parse(forecast.validTime)))}` : 'Tidsangivelse saknas'}${conditions ? ` · ${esc(conditions)}` : ''}</p><small>SMHI:s grid är cirka ${esc(point.resolutionKm)} km. Prognosen kan variera lokalt${point.status === 'stale' ? ' · prognosen kan vara fördröjd' : ''}${point.approvedAt ? ` · underlag från ${esc(formatSwedishTime(Date.parse(point.approvedAt)))}` : ''}.</small></article>`;
+  }).join('') : '<p>Brandriskprognos hämtas när det finns en beräknad rutt.</p>';
   const sourceRows = Object.entries(data.sourceStatus || {}).map(([source, status]) => `${source}: ${status.status}${status.fetchedAt ? ` (${formatSwedishTime(Date.parse(status.fetchedAt))})` : ''}`);
   $('#route-source-status').textContent = `Källkontroll ${formatSwedishTime(Date.parse(data.routeAnalysisUpdatedAt))}. ${sourceRows.join(' · ')}`;
   $('#route-source-status').classList.toggle('source-warning', Object.values(data.sourceStatus || {}).some(source => ['stale', 'unavailable', 'requires_key'].includes(source.status)));
@@ -628,6 +637,17 @@ function renderRouteOnMap() {
     L.geoJSON(geometry, { style: { color, weight: 2, fillColor: color, fillOpacity: 0.16 } })
       .bindPopup('<strong>' + esc(item.levelLabel || 'SMHI-varning') + ' · ' + esc(item.title) + '</strong><br>' + esc(item.area || '') + '<br><a href="' + esc(item.source) + '" target="_blank" rel="noopener">Öppna SMHI:s källa ↗</a>')
       .addTo(routeLayer);
+  }
+
+  const fireRiskColors = { 1: '#2f7ea1', 2: '#1a9b90', 3: '#d3a527', 4: '#e78022', 5: '#d95135', 6: '#9f2c34', 0: '#64748b' };
+  for (const point of state.currentRouteData.fireRiskAlongRoute || []) {
+    const riskClass = point.forecast?.riskClass || 0;
+    const color = fireRiskColors[riskClass] || fireRiskColors[0];
+    const label = point.forecast?.riskLabel || 'Prognos saknas';
+    const marker = L.circleMarker([point.lat, point.lon], { radius: 6, color, fillColor: color, fillOpacity: 0.9, weight: 2 });
+    marker.bindTooltip(`${(point.distanceMeters / 1000).toFixed(1)} km · ${label} brandrisk`);
+    marker.bindPopup(`<strong>SMHI · ${esc(label)} brandrisk</strong><br>${point.forecast?.validTime ? esc(formatSwedishTime(Date.parse(point.forecast.validTime))) : 'Prognos saknas'}<br><small>Ungefärlig modellpunkt längs rutten · <a href="${esc(SMHI_FIRE_RISK_SOURCE_URL)}" target="_blank" rel="noopener">Öppna SMHI ↗</a></small>`);
+    marker.addTo(routeLayer);
   }
 
   // Start & Mål markörer
