@@ -68,7 +68,7 @@ function renderFamilyApp() {
     <div class="family-consent"><h3>Min position</h3><p>${tracking ? 'GPS-delning pågår i den här öppna webbläsaren.' : 'GPS är pausad. Starta den själv på varje enhet. Senaste position används i högst 15 minuter efter att sidan stängts.'}</p>
       <div class="family-actions"><button id="family-start" class="btn-primary" ${tracking ? 'disabled' : ''}>📍 Starta min platsdelning</button><button id="family-stop" class="btn-secondary">Stoppa & radera min position</button></div>
       <small>Webbläsaren kan inte hålla GPS aktiv när sidan är stängd. Push kan nå dig om en ny polisnotis publiceras medan den senast delade positionen fortfarande är aktuell.</small></div>
-    <div class="family-consent"><h3>Telefonaviseringar</h3><p>${familyUi.config.pushEnabled ? 'Aktivera push på varje telefon där du vill få familjens varningar.' : 'Push är inte konfigurerat på denna server.'}</p><button id="family-push" class="btn-secondary" ${familyUi.config.pushEnabled ? '' : 'disabled'}>🔔 Aktivera push</button></div>
+    <div class="family-consent"><h3>Telefonaviseringar</h3><p>${familyUi.config.pushEnabled ? 'Aktivera push på varje telefon där du vill få familjens varningar.' : 'Push är inte konfigurerat på denna server.'}</p><button id="family-push" class="btn-secondary" ${familyUi.config.pushEnabled ? '' : 'disabled'}>🔔 Aktivera push</button><small>På iPhone: lägg först till TryggPuls på hemskärmen via webbläsarens Dela-meny och öppna appen därifrån.</small></div>
     <section><h3>Medlemmar</h3><div class="family-list">${members.map(member => `<div><strong>${safeText(member.display_name)}</strong> · ${member.sharing && member.updated_at ? 'Delade senast ' + safeText(formatSwedishTime(Date.parse(member.updated_at))) : 'Ingen aktuell platsdelning'}</div>`).join('')}</div></section>
     ${isOwner ? `<section class="family-owner"><h3>Bjud in en medlem</h3><p>Engångslänk, giltig i 24 timmar. Den inbjudna personen skapar eller loggar in på sitt eget konto och väljer själv om GPS får delas.</p><button id="family-invite" class="btn-secondary">Skapa inbjudningslänk</button><div id="family-invite-result"></div></section>` : '<button id="family-leave" class="btn-secondary">Lämna familjen och stoppa platsdelning</button>'}
     <section><h3>Familjens zoner</h3><p class="data-note">En trygg plats larmar när en medlem lämnar den. En bevakad plats larmar vid inträde. Zoner är era egna val och är inte klassade av Polisen.</p>
@@ -164,7 +164,7 @@ function vapidBytes(value) {
   return Uint8Array.from(decoded,ch => ch.charCodeAt(0));
 }
 async function familyEnablePush() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) { showToast('Push stöds inte i den här webbläsaren.'); return; }
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) { showToast('Push stöds inte här. På iPhone: lägg till TryggPuls på hemskärmen och öppna den därifrån.'); return; }
   try {
     const registration = await navigator.serviceWorker.register('/family-sw.js');
     const permission = await Notification.requestPermission();

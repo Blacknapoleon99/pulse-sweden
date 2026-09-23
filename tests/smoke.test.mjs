@@ -16,6 +16,11 @@ test('HTTP routing, input validation, health, HEAD and private files', async () 
     assert.match(await css.text(), /\.leaflet-tile/);
     assert.equal((await fetch(base + '/family-client.js')).status, 200);
     assert.equal((await fetch(base + '/family-sw.js')).status, 200);
+    const manifest = await fetch(base + '/manifest.webmanifest');
+    assert.equal(manifest.status, 200);
+    assert.match(manifest.headers.get('content-type'), /manifest\+json/);
+    assert.equal((await manifest.json()).display, 'standalone');
+    assert.equal((await fetch(base + '/icon-192.png')).status, 200);
     const mapConfig = await (await fetch(base + '/api/map-config')).json();
     assert.ok(['carto', 'openstreetmap'].includes(mapConfig.provider));
     assert.deepEqual(Object.keys(mapConfig), ['provider']);

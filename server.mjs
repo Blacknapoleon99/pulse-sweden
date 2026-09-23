@@ -783,7 +783,7 @@ export const server = http.createServer(async (req, res) => {
 
     // Static File Serving
     let filePath = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-    const publicFiles = ['index.html', 'app.js', 'family-client.js', 'family-sw.js', 'style.css', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', ...['layers.png', 'layers-2x.png', 'marker-icon.png', 'marker-icon-2x.png', 'marker-shadow.png'].map(name => 'vendor/leaflet/images/' + name)];
+    const publicFiles = ['index.html', 'app.js', 'family-client.js', 'family-sw.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', ...['layers.png', 'layers-2x.png', 'marker-icon.png', 'marker-icon-2x.png', 'marker-shadow.png'].map(name => 'vendor/leaflet/images/' + name)];
     if (!publicFiles.includes(filePath)) return json(req, res, 404, { error: 'Sidan kunde inte hittas' });
     const safePath = path.normalize(path.join(root, filePath));
     if (!safePath.startsWith(root)) {
@@ -798,6 +798,7 @@ export const server = http.createServer(async (req, res) => {
       else if (safePath.endsWith('.js') || safePath.endsWith('.mjs')) mimeType = 'text/javascript; charset=utf-8';
       else if (safePath.endsWith('.css')) mimeType = 'text/css; charset=utf-8';
       else if (safePath.endsWith('.json')) mimeType = 'application/json; charset=utf-8';
+      else if (safePath.endsWith('.webmanifest')) mimeType = 'application/manifest+json; charset=utf-8';
       else if (safePath.endsWith('.svg')) mimeType = 'image/svg+xml';
       else if (safePath.endsWith('.png')) mimeType = 'image/png';
       else if (safePath.endsWith('.jpg') || safePath.endsWith('.jpeg')) mimeType = 'image/jpeg';

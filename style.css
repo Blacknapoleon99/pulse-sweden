@@ -1460,13 +1460,13 @@ select:focus {
   position: relative;
   height: 100%;
   width: 100%;
-  background: #090e15;
+  background: #dfedf3;
 }
 
 #map {
   position: absolute;
   inset: 0;
-  background: #090e15;
+  background: #dfedf3;
 }
 
 /* BORTTAGET: ALLA CSS-FILTER PÅ TILE-PANE FÖR ATT FÖRHINDRA FÖRVÄNGDA RUTOR */
@@ -2015,6 +2015,7 @@ input, select { min-height: 44px; font-size: 14px !important; }
 .weather-red { border-left: 4px solid #ff5871; }
 .weather-message { border-left: 4px solid var(--accent-blue); }
 .source-warning { color: #ffd45a; }
+.family-app .source-warning { color: #ffe08a; background: #463617; border: 1px solid #9b7832; border-radius: 8px; padding: 12px 14px; }
 .source-status { color: var(--accent-amber) !important; }
 .source-card p, .legal-card p { font-size: 14px; line-height: 1.6; }
 .source-card small, .legal-card small { font: 12px/1.6 var(--font-body); }

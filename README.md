@@ -45,6 +45,8 @@ Nominatim används endast efter en uttrycklig sökning; gemensam kö begränsar 
 
 Platsuppslag och rutter skickar uppgifter till respektive kartleverantör. Personliga zoner lagras i webbläsaren; delade familjezoner, konton och aviseringar lagras i PostgreSQL. Familjens exakta GPS-position visas inte för andra medlemmar; den senaste positionen används för zon- och polisnotiser i högst 15 minuter och raderas när användaren stoppar delning. Varningshistorik raderas efter sju dagar. Platsdelning kräver att medlemmen aktivt startar den i sin öppna webbläsare. En stängd webbsida kan ta emot Web Push om en aktuell position redan finns, men webbläsaren kan inte fortsätta samla GPS i bakgrunden. För kontinuerlig platsdelning när appen är stängd behövs senare en mobilapp med uttryckliga platsbehörigheter. Polisnotiser är ungefärliga, kan vara fördröjda och indikerar inte automatiskt pågående fara. Någon verifierad rikstäckande karta över platser för gängrekrytering finns inte i de anslutna källorna.
 
+Webbappen har ett manifest och kan läggas till på hemskärmen. På iPhone/iPad måste den öppnas som en hemskärmsapp för att Web Push ska fungera; detta ändrar inte GPS-begränsningen ovan. [WebKit: Web Push för hemskärmsappar](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/).
+
 För tillförlitlig bakgrundskontroll på Render krävs en tjänst som inte somnar, samt en beständig databas. Renders gratistjänst somnar efter 15 minuter utan trafik och gratis Postgres upphör efter 30 dagar; gratisnivån passar endast förhandsvisning. SMS/delning öppnar enhetens funktion och skickar inte automatiskt något meddelande.
 
 ### Verifiering
