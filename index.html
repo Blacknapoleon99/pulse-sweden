@@ -13,11 +13,11 @@
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="/style.css?v=2.2">
+  <link rel="stylesheet" href="/style.css?v=3">
 
   <!-- Leaflet JS -->
   <script src="/vendor/leaflet/leaflet.js" defer></script>
-  <script src="/app.js?v=2.1" defer></script>
+  <script src="/app.js?v=4" defer></script>
   <script src="/family-client.js?v=1" defer></script>
 </head>
 <body>
@@ -37,39 +37,18 @@
 
     <!-- HUVUDFLIKAR -->
     <nav class="main-nav" role="tablist" aria-label="Huvudmenyer">
-      <button class="nav-tab active" data-tab="karta">
-        <span class="nav-icon">🗺️</span>
-        <span class="nav-label">Händelser</span>
-      </button>
-      <button class="nav-tab" data-tab="information"><span class="nav-icon">☁️</span><span class="nav-label">Väder & råd</span></button>
-      <button class="nav-tab" data-tab="rutt">
-        <span class="nav-icon">🚶</span>
-        <span class="nav-label">Ruttanalys</span>
-      </button>
-      <button class="nav-tab" data-tab="familj">
-        <span class="nav-icon">👨‍👩‍👧</span>
-        <span class="nav-label">Familj & zoner</span>
-      </button>
-      <button class="nav-tab" data-tab="foretag">
-        <span class="nav-icon">🏢</span>
-        <span class="nav-label">Företag</span>
-      </button>
-      <button class="nav-tab" data-tab="bra">
-        <span class="nav-icon">📊</span>
-        <span class="nav-label">Statistik</span>
-      </button>
-      <button class="nav-tab sos-tab" data-tab="sos">
-        <span class="nav-icon">🚨</span>
-        <span class="nav-label">SOS</span>
-      </button>
+      <button class="nav-tab active" data-tab="nara" role="tab" aria-selected="true"><span class="nav-icon">⌖</span><span class="nav-label">Nära mig</span></button>
+      <button class="nav-tab" data-tab="karta" role="tab" aria-selected="false"><span class="nav-icon">▦</span><span class="nav-label">Karta</span></button>
+      <button class="nav-tab" data-tab="rutt" role="tab" aria-selected="false"><span class="nav-icon">↗</span><span class="nav-label">Rutt</span></button>
+      <button class="nav-tab" data-tab="familj" role="tab" aria-selected="false"><span class="nav-icon">♧</span><span class="nav-label">Familj</span></button>
+      <button id="btn-more" class="nav-tab nav-more" type="button" aria-haspopup="dialog"><span class="nav-icon">•••</span><span class="nav-label">Mer</span></button>
     </nav>
 
     <div class="header-actions">
       <span class="badge-real-data" title="Polisen, BRÅ & Domstolsverket är myndighetsdata. Karttjänster är öppna källor.">
         ✓ Verifierade offentliga källor
       </span>
-      <button id="btn-sources" class="btn-subtle" aria-label="Öppna källinformation">Källstatus</button>
-      <button id="btn-legal" class="btn-subtle" aria-label="Öppna rättspraxis">Rättspraxis</button>
+      <a class="emergency-link" href="tel:112" aria-label="Ring 112 vid akut fara">Ring 112</a>
     </div>
     <div class="mobile-view-switch" aria-label="Välj vy"><button id="btn-view-content" aria-pressed="true">☷ Innehåll</button><button id="btn-view-map" aria-pressed="false">🗺️ Karta</button></div>
   </header>
@@ -79,7 +58,21 @@
     <aside id="sidebar" tabindex="-1">
 
       <!-- ==================== FLIK 1: KARTA & REALTID ==================== -->
-      <section id="panel-karta" class="tab-panel active">
+      <section id="panel-nara" class="tab-panel active" role="tabpanel" aria-labelledby="">
+        <div class="panel-header"><div class="eyebrow">DIN PLATS · MYNDIGHETSKÄLLOR</div><h1>Nära mig</h1><p>Se officiella notiser, varningar och närmaste polisstation för en plats du väljer.</p></div>
+        <div class="nearby-search-card">
+          <label for="nearby-query">Sök ort eller adress</label>
+          <div class="nearby-search-row"><input id="nearby-query" type="search" placeholder="Till exempel Uppsala" autocomplete="off"><button id="btn-nearby-search" class="btn-primary">Sök</button></div>
+          <div id="nearby-suggestions" class="suggestions-list" hidden></div>
+          <button id="btn-nearby-gps" class="btn-secondary" type="button">Använd min position</button>
+          <p id="nearby-place-label" class="nearby-place-label">Välj en ort eller använd GPS. Position hämtas först när du väljer det.</p>
+          <button id="btn-nearby-refresh" class="btn-secondary" type="button" hidden>Uppdatera uppgifter</button>
+        </div>
+        <div id="nearby-overview" class="nearby-overview" aria-live="polite"><p>Välj en plats för att hämta lokalt relevanta uppgifter.</p></div>
+        <p class="data-note">Polisnotiser är ett urval och kan publiceras med fördröjning. Kartpunkter och områdesmatchningar är ungefärliga; frånvaro av notiser betyder inte att en plats är säker.</p>
+      </section>
+
+      <section id="panel-karta" class="tab-panel">
         <div class="panel-header">
           <div class="eyebrow">HÄNDELSER & MYNDIGHETSINFORMATION</div>
           <h1>Händelser i Sverige</h1>
@@ -171,8 +164,8 @@
       <section id="panel-rutt" class="tab-panel">
         <div class="panel-header">
           <div class="eyebrow">TRYGG NAVIGATION</div>
-          <h1>Trygg Rutt</h1>
-          <p><em>"Jag ska gå hem – har något hänt längs vägen?"</em> Beräkna gång- eller körväg och analysera publicerade polisnotiser längs sträckan.</p>
+          <h1>Ruttanalys</h1>
+          <p>Planera en gång- eller bilresa och se myndighetszoner, vädervarningar, trafikstörningar och polisnotiser på ungefärlig områdesnivå längs vägen.</p>
         </div>
 
         <div class="route-form">
@@ -202,7 +195,7 @@
               </select>
             </div>
             <div class="select-wrapper">
-              <label for="route-buffer">Säkerhetskorridor:</label>
+              <label for="route-buffer">Område för ungefärliga polisnotiser:</label>
               <select id="route-buffer">
                 <option value="300">300 meter</option>
                 <option value="600" selected>600 meter (Rekommenderat)</option>
@@ -213,16 +206,22 @@
 
           <div class="route-actions">
             <button id="btn-calculate-route" class="btn-primary">
-              🔍 Beräkna & Analysera Rutt
+              Beräkna rutt
             </button>
             <button id="btn-clear-route" class="btn-secondary" hidden>Rensa rutt</button>
+            <button id="btn-route-follow" class="btn-secondary" type="button" hidden>Följ resan med GPS</button>
+            <button id="btn-route-stop" class="btn-danger" type="button" hidden>Stoppa GPS</button>
+            <button id="btn-reroute-current" class="btn-secondary" type="button" hidden>Beräkna om rutten från min position</button>
+            <button id="btn-route-view-map" class="btn-secondary" type="button" hidden>Visa rutten på kartan</button>
           </div>
+          <p id="route-follow-status" class="route-follow-status" role="status" hidden></p>
+          <p id="route-off-course" class="route-follow-status" role="status" hidden></p>
         </div>
 
         <div id="route-result" class="route-result-card" hidden>
           <div class="route-result-header">
             <div>
-              <span id="route-assessment-badge" class="assessment-badge safe">Trygg väg</span>
+          <span id="route-assessment-badge" class="assessment-badge">Ruttinformation</span>
               <h3 id="route-summary-title">Ruttanalys</h3>
             </div>
             <div class="route-metrics">
@@ -233,9 +232,13 @@
           <p id="route-assessment-text" class="route-assessment-text"></p>
 
           <div class="route-incidents-section">
-            <h4>Händelser längs sträckan (<span id="route-incidents-count">0</span>)</h4>
+            <h4>Polisnotiser i ungefärligt område (<span id="route-incidents-count">0</span>)</h4>
             <div id="route-incidents-list" class="route-incidents-list"></div>
           </div>
+          <section class="route-detail-section"><h4>Zoner rutten passerar</h4><div id="route-areas-list"></div></section>
+          <section class="route-detail-section"><h4>Trafikstörningar längs rutten</h4><div id="route-traffic-list"></div></section>
+          <section class="route-detail-section"><h4>Vädervarningar längs rutten</h4><div id="route-weather-list"></div></section>
+          <p id="route-source-status" class="route-source-status"></p>
         </div>
 
         <div class="quick-routes">
@@ -505,6 +508,16 @@
 
     </section>
   </main>
+
+  <dialog id="more-dialog" class="more-dialog">
+    <button class="btn-modal-close" id="btn-close-more" aria-label="Stäng menyn">×</button>
+    <div class="eyebrow">FLER TJÄNSTER</div><h2>Mer i TryggPuls</h2>
+    <div class="more-links">
+      <button data-go="information">Väder & beredskap</button><button data-go="bra">Brottsstatistik</button><button data-go="foretag">Företagsöversikt</button><button data-go="sos">Hjälp & SOS</button>
+      <button id="btn-sources">Datakällor och status</button><button id="btn-legal">Rättspraxis</button><a href="/admin" target="_blank" rel="noopener">Administratör: granskade zoner</a>
+      <button id="btn-theme-toggle" type="button">Byt till mörkt tema</button>
+    </div>
+  </dialog>
 
   <!-- ==================== MODAL: KÄLLOR & TRANSPARENS ==================== -->
   <dialog id="sources-dialog">

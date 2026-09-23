@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#eef5f0">
+  <title>Granskade zoner · TryggPuls</title><link rel="stylesheet" href="/style.css?v=3">
+  <script src="/admin.js?v=1" defer></script>
+</head>
+<body class="admin-page">
+  <main class="admin-shell">
+    <a href="/#nara" class="admin-back">← Till TryggPuls</a>
+    <header class="admin-heading"><div><span class="eyebrow">ADMINISTRATÖR · KÄLLBELAGD PUBLICERING</span><h1>Granskade zoner</h1><p>Skapa utkast från officiella myndighetsbeslut. Kontrollera källa, gräns och giltighet innan publicering.</p></div></header>
+    <section class="admin-card admin-auth"><h2>Administratörsåtkomst</h2><label for="admin-token">Administratörsnyckel</label><div class="admin-token-row"><input id="admin-token" type="password" autocomplete="off" placeholder="Ange nyckel för den här sessionen"><button id="admin-connect" class="btn-secondary">Anslut</button></div><p id="admin-status" role="status">Nyckeln används endast i denna webbläsersession och skickas till TryggPuls server över HTTPS.</p></section>
+    <form id="zone-form" class="admin-card" hidden>
+      <h2>Nytt zonutkast</h2><p>Godkända källor måste vara på Polisen, Krisinformation, SMHI, MCF/MSB eller Länsstyrelsens webbplats.</p>
+      <div class="admin-grid">
+        <label>Namn<input name="name" maxlength="120" required placeholder="Namn enligt myndighetsbeslut"></label>
+        <label>Zontyp<select name="kind" required><option value="security-zone">Tillfällig säkerhetszon</option><option value="organized-crime-area">Myndighetsbelagt område kopplat till nätverk</option></select></label>
+        <label>Rubrik på myndighetskällan<input name="sourceTitle" maxlength="240" required></label>
+        <label>Länk till myndighetskällan<input name="sourceUrl" type="url" required placeholder="https://polisen.se/…"></label>
+        <label>Publicerat eller beslutat<input name="sourceDate" type="date" required></label>
+        <label>Giltigt från<input name="validFrom" type="datetime-local" required></label>
+        <label>Giltigt till<input name="validTo" type="datetime-local"></label>
+      </div>
+      <label>Källans relevanta utdrag<textarea name="sourceExcerpt" maxlength="1000" required rows="3" placeholder="Kort citat eller sammanfattning som stöder den publicerade zonen"></textarea></label>
+      <label>GeoJSON-geometri i WGS84<textarea name="geometry" required rows="8" spellcheck="false" placeholder='{"type":"Polygon","coordinates":[[[18.0,59.0],[18.01,59.0],[18.01,59.01],[18.0,59.01],[18.0,59.0]]]} '></textarea></label>
+      <p>Endast polygoner inom Sverige godtas. Säkerhetszoner publiceras inte utan gränser som kan styrkas av beslutets karta.</p>
+      <button class="btn-primary" type="submit">Spara som utkast</button>
+    </form>
+    <section class="admin-card" aria-labelledby="zone-list-heading"><div class="admin-list-heading"><h2 id="zone-list-heading">Publiceringar och granskning</h2><button id="admin-refresh" class="btn-secondary" disabled>Uppdatera lista</button></div><div id="admin-zones" aria-live="polite"><p>Anslut med administratörsnyckel för att visa zonlistan.</p></div></section>
+  </main>
+</body>
+</html>

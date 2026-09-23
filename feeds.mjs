@@ -43,7 +43,8 @@ export function normalizeCrisis(items, type) {
     id: String(item.Id ?? item.ContentId), type,
     title: String(item.Headline), summary: String(item.Preamble || item.BodyText || ''),
     publishedAt: item.ChangedDate || item.Published || null,
-    area: Array.isArray(item.Area) ? item.Area.map(a => a.Description || a.Name || '').filter(Boolean).join(', ') : '',
+    area: Array.isArray(item.Area) ? item.Area.map(a => a.Description || a.Name || a.sv || '').filter(Boolean).join(', ') : '',
+    areas: Array.isArray(item.Area) ? item.Area.map(a => ({ name: a.Description || a.Name || a.sv || '', code: a.Code || a.code || null, geometry: a.area?.geometry || a.Geometry || a.geometry || null })).filter(a => a.name || a.geometry) : [],
     source: sourceLink(item.Web, 'https://www.krisinformation.se/')
   }));
 }
@@ -54,6 +55,8 @@ export function normalizeWarnings(items) {
     area: area.areaName?.sv || '', level: area.warningLevel?.code || 'UNKNOWN',
     levelLabel: area.warningLevel?.sv || 'Varning', publishedAt: area.published || null,
     validFrom: area.approximateStart || null, validTo: area.approximateEnd || null,
+    areaCode: Array.isArray(area.affectedAreas) ? area.affectedAreas.map(a => a.id).filter(Number.isFinite) : [],
+    geometry: area.area?.geometry || null,
     descriptions: [...(item.descriptions || []), ...(area.descriptions || [])].map(d => ({ title: d.title?.sv || '', text: d.text?.sv || '' })),
     source: 'https://www.smhi.se/vader/prognoser-och-varningar/varningar-och-meddelanden'
   }))).sort((a, b) => ({ RED: 0, ORANGE: 1, YELLOW: 2, MESSAGE: 3 }[a.level] ?? 4) - ({ RED: 0, ORANGE: 1, YELLOW: 2, MESSAGE: 3 }[b.level] ?? 4));

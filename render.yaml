@@ -21,6 +21,10 @@ services:
           property: connectionString
       - key: CARTO_BASEMAP_API_KEY
         sync: false
+      - key: TRAFIKVERKET_API_KEY
+        sync: false
+      - key: ZONE_ADMIN_TOKEN
+        sync: false
       - key: VAPID_PUBLIC_KEY
         sync: false
       - key: VAPID_PRIVATE_KEY

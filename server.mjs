@@ -3,6 +3,13 @@ import { feeds, readCrisis, createRequestQueue } from './feeds.mjs';
 import { createFamilyApi } from './family-api.mjs';
 import { readPoliceAreas, policeAreasStatus, sourcePage as policeAreasSource } from './police-areas.mjs';
 import { readZoneNews, zoneNewsStatus } from './police-zone-news.mjs';
+import { readTraffic, trafficStatus } from './traffic.mjs';
+import { readPoliceStations, policeStationsStatus } from './police-stations.mjs';
+import { readPoliceStationDetails } from './police-stations.mjs';
+import { policeApiFetch } from './police-api.mjs';
+import { createPublicZoneService } from './public-zones.mjs';
+import { findRouteZonePassages, routeSlice } from './route-analysis.mjs';
+import { readNearbyShelters, shelterSource, shelterStatus } from './shelters.mjs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +18,7 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 // Local secrets are ignored by Git. Hosting environments supply the same variables.
 try { process.loadEnvFile?.(path.join(root, '.env.local')); }
 catch (err) { if (err.code !== 'ENOENT') throw err; }
-const refreshIntervalMs = 65_000;
+const refreshIntervalMs = 75_000;
 const upstream = 'https://polisen.se/api/events';
 const legalUpstream = 'https://rattspraxis.etjanst.domstol.se/api/v1/publiceringar';
 const crisisApi = 'https://api.krisinformation.se/v3';
@@ -30,8 +37,10 @@ if (!process.env.DATABASE_URL && process.env.NODE_ENV !== 'production') {
   localFamilyPool = new adapter.Pool();
 }
 const familyApi = createFamilyApi(localFamilyPool ? { pool: localFamilyPool } : {});
+const publicZoneApi = createPublicZoneService(localFamilyPool ? { pool: localFamilyPool } : {});
 export const familyService = familyApi.service;
 let familyDbReady = false;
+let publicZoneDbReady = false;
 
 // Fel med HTTP-statuskod, används för upström fel i /api/route och /api/geocode
 class UpstreamError extends Error {
@@ -74,20 +83,23 @@ async function upstreamFetch(url, timeoutMs, extraHeaders = {}) {
 
 // Officiella datakällor (publiceras via /api/sources)
 const publicSources = [
-  { id: 'polisen-areas', name: 'Polisens lägesbild över utsatta områden', provider: 'Polismyndigheten', scope: 'Publicerade områdesgränser, inte pågående brott', refresh: 'Kontroll av ny geodata varje dygn', detail: 'Visar Polisens officiella GeoJSON för senaste publicerade nationella lägesbild. Bedömningen är periodisk och visar inte var rekrytering pågår just nu.', url: policeAreasSource },
+  { id: 'polisen-areas', name: 'Polisens lägesbild över utsatta områden', provider: 'Polismyndigheten', scope: 'Publicerade områdesgränser, inte pågående brott', refresh: 'Senaste publicerade nationella lägesbild; kontrollera källan för nya utgåvor', detail: 'Visar Polisens officiella GeoJSON för senaste publicerade nationella lägesbild. Bedömningen är periodisk och visar inte var rekrytering pågår just nu.', url: policeAreasSource },
   { id: 'polisen-zone-news', name: 'Polisens nyheter om säkerhetszoner', provider: 'Polismyndigheten', scope: 'Nyligen publicerade artiklar, inte verifierade aktiva zoner', refresh: 'Var 30:e minut när tjänsten används', detail: 'Filtrerar Polisens officiella nyhets- och press-RSS efter säkerhetszoner. Rubriker är inga geodata eller bevis för att ett beslut fortfarande gäller.', url: 'https://polisen.se/aktuellt/rss/' },
   { id: 'weather', name: 'SMHI – varningar och meddelanden', provider: 'SMHI', scope: 'Väder, vatten och regionala varningar', refresh: 'Var 65:e sekund', detail: 'Varningsnivå, område, giltighet och råd från SMHI. Innehållet återges med källhänvisning.', url: 'https://www.smhi.se/vader/prognoser-och-varningar/varningar-och-meddelanden' },
   { id: 'news', name: 'Krisinformation – nyheter', provider: 'Krisinformation.se', scope: 'Nationella och regionala krisnyheter senaste veckan', refresh: 'Var 5:e minut', detail: 'Separat nyhetsflöde, skilt från aktiva VMA.', url: 'https://api.krisinformation.se/v3' },
   { id: 'preparedness', name: 'Krisinformation – förbered dig', provider: 'Krisinformation.se', scope: 'Officiella beredskapsguider', refresh: 'Varje timme', detail: 'Praktisk information om att förbereda sig för samhällsstörningar.', url: 'https://www.krisinformation.se/' },
-  { id: 'trafikverket', name: 'Trafikverket – väg och järnväg', provider: 'Trafikverket', status: 'requires_key', scope: 'Möjlig komplettering med trafikinformation', refresh: 'Ej ansluten', detail: 'Kräver registrering och en API-nyckel. Polisens trafiknotiser finns redan i kartan.', url: 'https://data.trafikverket.se/' },
+  { id: 'trafikverket', name: 'Trafikverket – väg och järnväg', provider: 'Trafikverket', scope: 'Publicerade väg- och järnvägsstörningar', refresh: 'Var 60:e sekund när tjänsten används', detail: 'Serveranslutning till Trafikverkets öppna API. Aktiva störningar längs en beräknad rutt visas när källan ger geometri.', url: 'https://www.trafikverket.se/e-tjanster/trafikverkets-oppna-api-for-trafikinformation/' },
+  { id: 'polisen-stations', name: 'Polisen – polisstationer', provider: 'Polismyndigheten', scope: 'Stationer, tjänster och adresser i Sverige', refresh: 'Daglig cache när tjänsten används', detail: 'Officiellt stationsregister. Stationer visas med adress och länk till öppettider och tjänster.', url: 'https://polisen.se/om-polisen/om-webbplatsen/oppna-data/api-over-polisstationer/' },
+  { id: 'civil-shelters', name: 'Skyddsrum – nationellt register', provider: 'Myndigheten för civilt försvar', scope: 'Publikt register över skyddsrumsplatser och angiven kapacitet', refresh: 'Hämtas för vald plats och cachas i 15 minuter', detail: 'Sökresultatet visar registrerade platser inom vald radie. Registret anger inte om ett skyddsrum är öppet, tillgängligt eller iordningställt just nu.', url: shelterSource },
+  { id: 'reviewed-zones', name: 'Granskade myndighetszoner', provider: 'TryggPuls · myndighetskällor', status: process.env.DATABASE_URL ? 'on_demand' : 'unavailable', scope: 'Manuellt granskade beslut med källa och giltighetstid', refresh: 'Visas efter administratörsgranskning', detail: 'Zoner publiceras först efter kontroll av myndighetskälla, karta och giltighet. Artiklar utan gränsdata visas som länkar.', url: 'https://polisen.se/lagar-och-regler/sakerhetszoner/' },
   {
     id: 'polisen-events',
     name: 'Polisen öppna händelser',
     provider: 'Polismyndigheten',
     status: 'active',
-    scope: 'Realtidsnotiser om inträffade brott, olyckor och kontroller',
-    refresh: 'Var 65:e sekund',
-    detail: 'Hämtas direkt via Polisens publika JSON-API med koordinater för berört område och direktlänk till polisnotisen.',
+    scope: 'Urval av publicerade händelsenotiser',
+    refresh: 'Var 75:e sekund; Polisens publicerade notiser kan dröja',
+    detail: 'Polisens API anger kommun eller län och kan ha publiceringsfördröjning. Kartpunkterna är områdesmarkörer, inte exakta brottsplatser.',
     url: 'https://polisen.se/om-polisen/om-webbplatsen/oppna-data/api-over-polisens-handelser/'
   },
   {
@@ -216,7 +228,8 @@ async function fetchEvents() {
     eventLastAttempt = Date.now();
     eventPending = (async () => {
       try {
-        const response = await upstreamFetch(upstream, 15_000);
+        const response = await policeApiFetch(upstream, { signal: AbortSignal.timeout(15_000), headers: { Accept: 'application/json' } });
+        if (!response.ok) throw new UpstreamError(`Polisens API svarade med status ${response.status}`, 502, response.status);
         const rawData = await response.json().catch(() => null);
         if (!Array.isArray(rawData)) throw new Error('Oväntat svarsformat från Polisens API');
 
@@ -582,30 +595,92 @@ async function calculateSafeRoute(fromLat, fromLon, toLat, toLon, mode = 'walkin
   const coordinates = primaryRoute.geometry?.coordinates || [];
   if (coordinates.length < 2 || !Number.isFinite(primaryRoute.distance) || !Number.isFinite(primaryRoute.duration)) throw new UpstreamError('Ofullständig rutt från källan');
 
-  // Hämta aktiva händelser från cache
+  // Polisnotiser anger kommun/län. Punkten får användas som grov geografisk
+  // relevans, aldrig för att visa ett exakt avstånd till brott.
   const eventsResult = await fetchEvents();
-  if (eventsResult.fetchedAt === null) {
-    throw new UpstreamError('Incidentanalysen kan inte utföras — Polisens händelsedata svarar inte', 502);
-  }
   const allEvents = (eventsResult.events || []).filter(e => e.ts >= Date.now() - 24 * 3600000);
 
-  // Analysera vilka händelser som ligger inom vald säkerhetskorridor
+  // Berörda områdesmarkörer kan ligga långt från den faktiska händelsen.
   const incidentsNearRoute = [];
 
   for (const event of allEvents) {
     if (!event.location || !event.location.gps) continue;
     const [eLat, eLon] = event.location.gps;
     const distanceM = minDistanceToRouteMeters(eLat, eLon, coordinates);
-    if (distanceM <= bufferMeters) {
+    if (distanceM <= Math.max(bufferMeters, 8_000)) {
       incidentsNearRoute.push({
         ...event,
-        distanceFromRouteMeters: Math.round(distanceM)
+        locationPrecision: 'Kommunens eller länets ungefärliga kartpunkt',
+        approximateRelevance: true,
+        _sortDistance: distanceM
       });
     }
   }
 
-  // Sortera händelser efter avstånd till rutt
-  incidentsNearRoute.sort((a, b) => a.distanceFromRouteMeters - b.distanceFromRouteMeters);
+  incidentsNearRoute.sort((a, b) => a._sortDistance - b._sortDistance);
+  for (const event of incidentsNearRoute) delete event._sortDistance;
+
+  const sourceStates = {};
+  const routeAreas = [];
+  const areaResult = await readPoliceAreas().catch(() => null);
+  if (areaResult) {
+    sourceStates['polisen-areas'] = { status: areaResult.stale ? 'stale' : 'ok', fetchedAt: areaResult.checkedAt || null };
+    for (const passage of findRouteZonePassages(coordinates, areaResult.features)) {
+      const feature = passage.feature;
+      routeAreas.push({
+        id: `police-${feature.id}`, name: feature.properties.name, kind: 'police-area',
+        category: feature.properties.category, locality: feature.properties.locality,
+        sourceTitle: `Polisens lägesbild ${areaResult.year}`, sourceUrl: areaResult.sourceUrl,
+        sourceDate: `${areaResult.year}`, stale: Boolean(areaResult.stale),
+        startMeters: Math.round(passage.startMeters), endMeters: Math.round(passage.endMeters),
+        line: routeSlice(coordinates, passage.startMeters, passage.endMeters)
+      });
+    }
+  } else sourceStates['polisen-areas'] = { status: 'unavailable', fetchedAt: null };
+
+  const reviewedResult = await publicZoneApi.listPublic().catch(() => null);
+  if (reviewedResult) {
+    sourceStates['reviewed-zones'] = { status: 'ok', fetchedAt: reviewedResult.fetchedAt };
+    for (const passage of findRouteZonePassages(coordinates, reviewedResult.features)) {
+      const properties = passage.feature.properties;
+      routeAreas.push({
+        id: passage.feature.id, name: properties.name, kind: properties.kind,
+        category: properties.kind === 'security-zone' ? 'Aktiv säkerhetszon' : 'Myndighetsuppgift om kriminellt nätverk',
+        locality: '', sourceTitle: properties.sourceTitle, sourceUrl: properties.sourceUrl,
+        sourceDate: properties.sourceDate, validFrom: properties.validFrom, validTo: properties.validTo,
+        startMeters: Math.round(passage.startMeters), endMeters: Math.round(passage.endMeters),
+        line: routeSlice(coordinates, passage.startMeters, passage.endMeters)
+      });
+    }
+  } else sourceStates['reviewed-zones'] = { status: 'unavailable', fetchedAt: null };
+  routeAreas.sort((a, b) => a.startMeters - b.startMeters);
+
+  const [traffic, weather] = await Promise.all([readTraffic(), feeds.weather.read()]);
+  sourceStates.trafikverket = { status: traffic.status, fetchedAt: traffic.fetchedAt };
+  sourceStates.weather = { status: weather.status, fetchedAt: weather.fetchedAt };
+  const trafficNearRoute = (traffic.items || []).flatMap(item => {
+    const geometry = item.geometry;
+    const feature = geometry?.type === 'Feature' ? geometry : geometry?.type ? { type: 'Feature', geometry, properties: {} } : null;
+    let distanceM = Infinity;
+    if (feature && ['Polygon', 'MultiPolygon'].includes(feature.geometry.type)) {
+      if (findRouteZonePassages(coordinates, [feature], { sampleMeters: 120 }).length) distanceM = 0;
+    } else {
+      const points = [];
+      const visit = value => {
+        if (Array.isArray(value) && value.length >= 2 && typeof value[0] === 'number' && typeof value[1] === 'number') points.push([value[1], value[0]]);
+        else if (Array.isArray(value)) value.forEach(visit);
+      };
+      visit(geometry?.coordinates || geometry);
+      for (const [lat, lon] of points) distanceM = Math.min(distanceM, minDistanceToRouteMeters(lat, lon, coordinates));
+    }
+    return distanceM <= Math.max(2_000, bufferMeters) ? [{ ...item, approximateRelevance: true }] : [];
+  }).slice(0, 50);
+  const weatherAlongRoute = (weather.items || []).flatMap(item => {
+    const feature = item.geometry?.type === 'Feature' ? item.geometry : item.geometry?.type ? { type: 'Feature', geometry: item.geometry, properties: {} } : null;
+    if (!feature) return [];
+    const passages = findRouteZonePassages(coordinates, [feature], { sampleMeters: 150 });
+    return passages.length ? [{ id: item.id, title: item.title, area: item.area, level: item.level, levelLabel: item.levelLabel, validFrom: item.validFrom, validTo: item.validTo, source: item.source, geometry: feature.geometry, passages: passages.map(p => ({ startMeters: Math.round(p.startMeters), endMeters: Math.round(p.endMeters) })) }] : [];
+  });
 
   return {
     ok: true,
@@ -616,24 +691,33 @@ async function calculateSafeRoute(fromLat, fromLon, toLat, toLon, mode = 'walkin
     mode,
     bufferMeters,
     geometry: primaryRoute.geometry,
+    routeAreas,
+    trafficNearRoute,
+    weatherAlongRoute,
+    sourceStatus: {
+      'polisen-events': { status: eventsResult.fetchedAt ? eventsResult.stale ? 'stale' : 'ok' : 'unavailable', fetchedAt: eventsResult.fetchedAt },
+      ...sourceStates
+    },
+    routeAnalysisUpdatedAt: new Date().toISOString(),
+    policeLocationPrecision: 'Polisen anger kommun eller län. Dessa kartpunkter är ungefärliga områdesmarkörer.',
     incidentsCount: incidentsNearRoute.length,
     incidentsNearRoute,
     // Ärlighetsflagga: true endast om senaste hämtningen misslyckades men en
     // tidigare cache används (färska data => flaggan spås ut ur svaret)
-    eventsStale: eventsResult.stale || undefined,
+    eventsStale: eventsResult.stale || !eventsResult.fetchedAt || undefined,
     eventsFetchedAt: eventsResult.stale ? eventsResult.fetchedAt : undefined,
-    assessment:
-      incidentsNearRoute.length === 0
-        ? 'Inga publicerade polisnotiser de senaste 24 timmarna har rapporterats inom din valda säkerhetskorridor.'
-        : `Observera: ${incidentsNearRoute.length} ${
-            incidentsNearRoute.length === 1 ? 'publicerad händelse' : 'publicerade händelser'
-          } har rapporterats inom ${bufferMeters} meter från din rutt.`
+    assessment: 'Sammanställning av publicerad information från myndighetskällor. Polisnotiser visas på ungefärlig områdesnivå.'
   };
 }
 
 // ==== HTTP-SERVER & ROUTER ====
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
+  if (url.pathname === '/api/public-zones' || url.pathname.startsWith('/api/admin/zones')) {
+    if (!publicZoneDbReady && publicZoneApi.available) return json(req, res, 503, { error: 'Zonregistret startar fortfarande' });
+    return publicZoneApi.handle(req, res, url);
+  }
 
   if (url.pathname.startsWith('/api/family/')) {
     if (!familyDbReady && familyApi.service.available) return json(req,res,503,{error:'Familjedatabasen svarar inte',code:'FAMILY_DATABASE_UNAVAILABLE'});
@@ -690,6 +774,30 @@ export const server = http.createServer(async (req, res) => {
     if (extraFeeds[url.pathname]) {
       const result = await feeds[extraFeeds[url.pathname]].read();
       return json(req, res, result.fetchedAt ? 200 : 503, result);
+    }
+    if (url.pathname === '/api/traffic') {
+      const result = await readTraffic();
+      return json(req, res, result.fetchedAt || result.status === 'requires_key' ? 200 : 503, result);
+    }
+    if (url.pathname === '/api/police-stations') {
+      const result = await readPoliceStations();
+      return json(req, res, result.fetchedAt ? 200 : 503, result);
+    }
+    if (url.pathname === '/api/shelters') {
+      const lat = Number(url.searchParams.get('lat'));
+      const lon = Number(url.searchParams.get('lon'));
+      const radius = Number(url.searchParams.get('radius') || 2_000);
+      try {
+        const result = await readNearbyShelters(lat, lon, radius);
+        return json(req, res, result.status === 'unavailable' ? 503 : 200, result);
+      } catch (error) {
+        return json(req, res, error.status || 502, { error: error.status ? error.message : 'Skyddsrumsregistret kunde inte hämtas' });
+      }
+    }
+    const stationMatch = /^\/api\/police-stations\/(\d+)$/.exec(url.pathname);
+    if (stationMatch) {
+      try { return json(req, res, 200, await readPoliceStationDetails(stationMatch[1])); }
+      catch (error) { return json(req, res, error.status || 502, { error: error.status ? error.message : 'Stationens öppettider kunde inte hämtas' }); }
     }
 
     if (url.pathname === '/api/police-areas') {
@@ -794,8 +902,8 @@ export const server = http.createServer(async (req, res) => {
     }
 
     // Static File Serving
-    let filePath = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-    const publicFiles = ['index.html', 'app.js', 'family-client.js', 'family-sw.js', 'style.css', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', ...['layers.png', 'layers-2x.png', 'marker-icon.png', 'marker-icon-2x.png', 'marker-shadow.png'].map(name => 'vendor/leaflet/images/' + name)];
+    let filePath = url.pathname === '/' ? 'index.html' : url.pathname === '/admin' ? 'admin.html' : url.pathname.slice(1);
+    const publicFiles = ['index.html', 'app.js', 'family-client.js', 'family-sw.js', 'style.css', 'admin.html', 'admin.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', ...['layers.png', 'layers-2x.png', 'marker-icon.png', 'marker-icon-2x.png', 'marker-shadow.png'].map(name => 'vendor/leaflet/images/' + name)];
     if (!publicFiles.includes(filePath)) return json(req, res, 404, { error: 'Sidan kunde inte hittas' });
     const safePath = path.normalize(path.join(root, filePath));
     if (!safePath.startsWith(root)) {
@@ -834,7 +942,7 @@ export const server = http.createServer(async (req, res) => {
 
 async function initializeFamily() {
   if (!familyApi.service.available) return;
-  try { await familyApi.service.init(); familyDbReady = true; }
+  try { await Promise.all([familyApi.service.init(), publicZoneApi.init()]); familyDbReady = true; publicZoneDbReady = true; }
   catch (err) { console.error('[family] Databasen svarar inte:',err.message); }
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -884,7 +992,10 @@ function sourceStatuses() {
     'bra-stat': observed(braCache, braError),
     'polisen-areas': policeAreasStatus(),
     'polisen-zone-news': zoneNewsStatus(),
-    'krisinformation-v3': { status: crisisStates.some(s => s.error) ? 'stale' : crisisStates.every(s => s.fetchedAt) ? 'ok' : 'not_checked' },
+    'krisinformation-v3': { status: crisisStates.some(s => s.error) ? 'stale' : crisisStates.every(s => s.fetchedAt) ? 'ok' : 'not_checked', fetchedAt: crisisStates.map(s => s.fetchedAt).filter(Boolean).sort()[0] || null },
+    'civil-shelters': shelterStatus(),
+    trafikverket: trafficStatus(), 'polisen-stations': policeStationsStatus(),
+    'reviewed-zones': { status: publicZoneApi.available && publicZoneDbReady ? 'on_demand' : 'unavailable', fetchedAt: null },
     'osrm-routing': { status: 'on_demand' }, 'nominatim-osm': { status: 'on_demand' }
   };
   return publicSources.map(s => ({ ...s, ...(feeds[s.id] ? observed(feeds[s.id].snapshot().fetchedAt ? feeds[s.id].snapshot() : null, feeds[s.id].snapshot().error) : statuses[s.id] || {}) }));

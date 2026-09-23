@@ -10,8 +10,6 @@ const bundledPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dat
 const sweref99 = '+proj=utm +zone=33 +ellps=GRS80 +units=m +no_defs';
 const validCategories = new Set(['Utsatt område', 'Särskilt utsatt område']);
 let snapshot;
-let lastCheck = 0;
-let pending;
 
 export function policeAreasStatus() {
   return { status: !snapshot ? 'not_checked' : snapshot.stale ? 'stale' : 'ok', fetchedAt: snapshot?.checkedAt || null };
@@ -39,7 +37,7 @@ export function parsePoliceAreasZip(bytes, downloadUrl) {
   });
   const year = Number(downloadUrl.match(/uso_(20\d{2})_geojson\.zip/i)?.[1]);
   if (!year || year < 2025 || year > new Date().getUTCFullYear() + 1) throw new Error('Okänt år för Polisens områdesdata');
-  return { type: 'FeatureCollection', features, year, sourceUrl: sourcePage, downloadUrl, checkedAt: new Date().toISOString(), stale: false };
+  return { type: 'FeatureCollection', features, year, sourceUrl: sourcePage, downloadUrl, checkedAt: null, stale: false };
 }
 
 function ringContains(ring, lon, lat) {
@@ -56,37 +54,10 @@ export function areaContains(feature, lat, lon) {
   return polygons.some(rings => ringContains(rings[0], lon, lat) && !rings.slice(1).some(hole => ringContains(hole, lon, lat)));
 }
 
-function findDownloadUrl(html) {
-  const links = [...html.matchAll(/href=["']([^"']*uso_(20\d{2})_geojson\.zip[^"']*)["']/gi)];
-  if (!links.length) throw new Error('Ingen GeoJSON-nedladdning på Polisens sida');
-  const newest = links.sort((a, b) => Number(b[2]) - Number(a[2]))[0];
-  const url = new URL(newest[1].replaceAll('&amp;', '&'), sourcePage);
-  if (url.protocol !== 'https:' || url.hostname !== 'polisen.se') throw new Error('Ogiltig geodatakälla');
-  return url.href;
-}
-
 export async function readPoliceAreas() {
   if (!snapshot) snapshot = parsePoliceAreasZip(await readFile(bundledPath), bundledUrl);
-  if (Date.now() - lastCheck < 24 * 3600_000) return snapshot;
-  if (!pending) {
-    lastCheck = Date.now();
-    pending = (async () => {
-      try {
-        const page = await fetch(sourcePage, { signal: AbortSignal.timeout(10_000) });
-        if (!page.ok) throw new Error(`Källsidan svarade ${page.status}`);
-        const url = findDownloadUrl(await page.text());
-        const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-        if (!response.ok) throw new Error(`Geodata svarade ${response.status}`);
-        const bytes = await response.arrayBuffer();
-        if (bytes.byteLength > 5_000_000) throw new Error('Oväntat stort geodataarkiv');
-        snapshot = parsePoliceAreasZip(bytes, url);
-      } catch (error) {
-        console.warn('[police-areas] Kunde inte kontrollera senaste geodata:', error.message);
-        snapshot = { ...snapshot, stale: true };
-        lastCheck = Date.now() - 23 * 3600_000; // nytt försök om en timme
-      } finally { pending = null; }
-      return snapshot;
-    })();
-  }
-  return pending;
+  // Polisen publishes this assessment as an annual GeoJSON download, not a
+  // live API. Use the verified 2025 file bundled with the app; do not scrape
+  // the web page or imply that these boundaries describe current incidents.
+  return snapshot;
 }

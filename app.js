@@ -15,10 +15,9 @@ function savePlaces(key, rows) {
   try { localStorage.setItem(key, JSON.stringify(rows)); }
   catch { showToast('Webbläsaren kunde inte spara. Platserna finns kvar tills sidan stängs.'); }
 }
-
 // ==================== APP STATE ====================
 const state = {
-  activeTab: 'karta',
+  activeTab: 'nara',
   events: [],
   eventsAvailable: false,
   eventsStale: false,
@@ -34,6 +33,13 @@ const state = {
   sources: [],
   policeAreas: null,
   showPoliceAreas: true,
+  nearbyPoint: null,
+  nearbyLabel: '',
+  policeStations: [],
+  routeFollowActive: false,
+  routeFollowWatch: null,
+  routeFollowTimer: null,
+  followPosition: null,
   
   // Trygg Rutt
   routeFrom: null, // { name, lat, lon }
@@ -119,6 +125,7 @@ const markersLayer = L.layerGroup().addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
 const zonesLayer = L.layerGroup().addTo(map);
 const userLayer = L.layerGroup().addTo(map);
+const nearbyLayer = L.layerGroup().addTo(map);
 
 // Säkerhetskorridor (ruttanalys): halvgenomskinlig bård runt rutten.
 // Referens hålls i ett var så att zoomend kan uppdatera bredden.
@@ -179,15 +186,15 @@ function showToast(msg) {
 // ==================== FLIKHANTERING ====================
 function setActiveTab(tabKey, updateHistory = true) {
   if (tabKey.startsWith('familj-invite=')) tabKey = 'familj';
-  if (!document.getElementById('panel-' + tabKey)) tabKey = 'karta';
+  if (!document.getElementById('panel-' + tabKey)) tabKey = 'nara';
   if (updateHistory && location.hash !== '#' + tabKey) history.pushState(null, '', '#' + tabKey);
   $('#sidebar').scrollTop = 0;
-  setMobileView(false);
+  setMobileView(tabKey === 'karta');
   state.activeTab = tabKey;
 
   // Uppdatera nav-knappar
   $$('.nav-tab').forEach(tab => {
-    const isActive = tab.dataset.tab === tabKey;
+    const isActive = tab.dataset.tab === tabKey || (tab.id === 'btn-more' && ['information', 'foretag', 'bra', 'sos'].includes(tabKey));
     tab.classList.toggle('active', isActive);
     tab.setAttribute('aria-selected', isActive);
     tab.tabIndex = isActive ? 0 : -1;
@@ -457,17 +464,17 @@ function setupRouteSearch() {
   $('#btn-clear-route').addEventListener('click', clearRoute);
 }
 
-async function calculateRoute() {
+async function calculateRoute({ refresh = false } = {}) {
   if (!state.routeFrom || !state.routeTo) {
     showToast('Ange både startpunkt och destination för att beräkna rutt.');
     return;
   }
 
-  invalidateRoute();
+  if (!refresh) invalidateRoute();
   const revision = routeRevision;
   const calcBtn = $('#btn-calculate-route');
   calcBtn.disabled = true;
-  calcBtn.textContent = 'Analyserar rutt & säkerhetsläge...';
+  calcBtn.textContent = refresh ? 'Uppdaterar källor…' : 'Beräknar rutt…';
 
   const mode = $('#route-mode').value;
   const buffer = $('#route-buffer').value;
@@ -486,12 +493,20 @@ async function calculateRoute() {
     renderRouteResult(data);
     renderRouteOnMap();
     $('#btn-clear-route').hidden = false;
-    showToast(`Rutt beräknad! ${data.distanceKm} km · ${data.durationMinutes} min.`);
+    $('#btn-route-follow').hidden = false;
+    $('#btn-route-view-map').hidden = false;
+    if (!refresh) showToast(`Rutt beräknad: ${data.distanceKm} km · ${data.durationMinutes} min.`);
   } catch (err) {
-    if (revision === routeRevision) showToast(`Fel vid ruttberäkning: ${err.message}`);
+    if (revision === routeRevision) {
+      if (refresh && state.currentRouteData) {
+        const status = $('#route-source-status');
+        status.textContent = `Källorna kunde inte uppdateras: ${err.message}. Visar senast hämtade uppgifter.`;
+        status.classList.add('source-warning');
+      } else showToast(`Fel vid ruttberäkning: ${err.message}`);
+    }
   } finally {
     calcBtn.disabled = false;
-    calcBtn.textContent = '🔍 Beräkna & Analysera Rutt';
+    calcBtn.textContent = 'Beräkna rutt';
   }
 }
 
@@ -500,49 +515,60 @@ function renderRouteResult(data) {
   card.hidden = false;
 
   const badge = $('#route-assessment-badge');
-  if (data.incidentsCount === 0) {
-    badge.className = 'assessment-badge safe';
-    badge.textContent = 'Inga rapporterade händelser i korridor';
-  } else {
-    badge.className = 'assessment-badge caution';
-    badge.textContent = `${data.incidentsCount} händelse${data.incidentsCount > 1 ? 'r' : ''} nära rutten`;
-  }
+  badge.className = 'assessment-badge';
+  badge.textContent = `${data.routeAreas?.length || 0} zonpassager · ${data.incidentsCount} områdesnotiser`;
 
   $('#route-dist-label').textContent = `${data.distanceKm} km`;
   $('#route-time-label').textContent = `${data.durationMinutes} min (${data.mode === 'driving' ? 'bil' : 'gång'})`;
-  $('#route-assessment-text').textContent = data.assessment + ' Kartpunkterna är ungefärliga och visar inte exakta brottsplatser.';
+  const assessment = $('#route-assessment-text');
+  assessment.replaceChildren();
+  const precision = document.createElement('p');
+  precision.textContent = data.policeLocationPrecision || 'Polisnotiser anger ungefärligt område och kan vara fördröjda.';
+  assessment.append(precision);
   // Ärlig markering om polisens händelsedata var cachelagd/föråldrad vid analysen
   if (data.eventsStale) {
     const note = document.createElement('p');
     note.className = 'route-stale-note';
     note.textContent = 'Obs: händelsedatan kan vara föråldrad' +
       (data.eventsFetchedAt ? ' (senast lyckad hämtning ' + formatSwedishTime(Date.parse(data.eventsFetchedAt)) + ')' : '') + '.';
-    $('#route-assessment-text').appendChild(note);
+    assessment.appendChild(note);
   }
   $('#route-incidents-count').textContent = data.incidentsCount;
 
   const list = $('#route-incidents-list');
   if (data.incidentsCount === 0) {
-    list.innerHTML = `<p style="font-size: 11px; color: var(--text-dim); margin: 0;">Inga polisnotiser inom din valda säkerhetskorridor (${data.bufferMeters}m).</p>`;
+    list.innerHTML = '<p>Inga polisnotiser matchar det grova områdesurvalet just nu. Det betyder inte att rutten saknar risker.</p>';
   } else {
     list.innerHTML = data.incidentsNearRoute.map(e => `
       <div class="route-incident-item">
-        <strong>${esc(e.type)}: ${esc(e.name)}</strong>
-        <p style="margin: 2px 0; color: var(--text-muted);">${esc(e.summary)}</p>
-        <span class="route-incident-dist">⌖ Avstånd från rutt: ${e.distanceFromRouteMeters} meter</span>
+        <strong>${esc(e.type)} · ${esc(e.name)}</strong>
+        <p>${esc(e.summary)}</p>
+        <small>${esc(e.location?.name || 'Berört område')} · ${esc(formatSwedishTime(e.ts))} · ungefärlig områdespunkt</small>
+        ${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">Öppna polisnotisen ↗</a>` : ''}
       </div>
     `).join('');
   }
 
+  const routeAreas = data.routeAreas || [];
+  $('#route-areas-list').innerHTML = routeAreas.length ? routeAreas.map(zone => `<article class="route-zone-item"><strong>${esc(zone.category)} · ${esc(zone.name)}</strong><p>${esc(zone.locality)}${zone.locality ? ' · ' : ''}${(zone.startMeters / 1000).toFixed(1)}–${(zone.endMeters / 1000).toFixed(1)} km längs rutten${zone.validTo ? ` · gilt till ${esc(formatSwedishTime(Date.parse(zone.validTo)))}` : ''}</p><a href="${esc(zone.sourceUrl)}" target="_blank" rel="noopener">${esc(zone.sourceTitle)} ↗</a></article>`).join('') : '<p>Inga zonpassager hittades i tillgängliga gränsdata.</p>';
+  const traffic = data.trafficNearRoute || [];
+  $('#route-traffic-list').innerHTML = traffic.length ? traffic.map(item => `<article class="route-zone-item"><strong>${esc(item.title)}</strong><p>${esc(item.description || item.location || '')}${item.road ? ` · ${esc(item.road)}` : ''}${item.severity ? ` · ${esc(item.severity)}` : ''}</p><small>${item.modifiedAt ? `Uppdaterad ${esc(formatSwedishTime(Date.parse(item.modifiedAt)))}` : 'Publicerad trafikinformation'} · kartläge kan vara ungefärligt</small><a href="${esc(item.source)}" target="_blank" rel="noopener">Trafikverket ↗</a></article>`).join('') : '<p>Inga matchande trafikstörningar hittades eller så saknas precis geometri i källan.</p>';
+  const weather = data.weatherAlongRoute || [];
+  $('#route-weather-list').innerHTML = weather.length ? weather.map(item => `<article class="route-zone-item"><strong>${esc(item.levelLabel)} · ${esc(item.title)}</strong><p>${esc(item.area || '')}${item.validTo ? ` · till ${esc(formatSwedishTime(Date.parse(item.validTo)))}` : ''}</p><a href="${esc(item.source)}" target="_blank" rel="noopener">Läs SMHI:s varning ↗</a></article>`).join('') : '<p>Inga geografiskt matchande SMHI-varningar hittades i aktuella data.</p>';
+  const sourceRows = Object.entries(data.sourceStatus || {}).map(([source, status]) => `${source}: ${status.status}${status.fetchedAt ? ` (${formatSwedishTime(Date.parse(status.fetchedAt))})` : ''}`);
+  $('#route-source-status').textContent = `Källkontroll ${formatSwedishTime(Date.parse(data.routeAnalysisUpdatedAt))}. ${sourceRows.join(' · ')}`;
+  $('#route-source-status').classList.toggle('source-warning', Object.values(data.sourceStatus || {}).some(source => ['stale', 'unavailable', 'requires_key'].includes(source.status)));
+
   // Faktisk information — denna analys är INTE en trygghetsgaranti.
   const disclaimer = document.createElement('p');
   disclaimer.className = 'route-disclaimer';
-  disclaimer.textContent = 'Denna analys bygger på offentliga polisnotiser och är endast informativ. Polisen publicerar inte varje enskild händelse, och avsaknad av händelser innebär inte att en sträcka är säker. Använd omdöme och förebyggande åtgärder.';
-  $('#route-assessment-text').appendChild(disclaimer);
+  disclaimer.textContent = 'Det här är en sammanställning av publicerad information, ingen säkerhetsklassning eller garanti. Polisnotiser kan vara fördröjda och deras kartpunkter anger kommun eller län. Kontrollera alltid myndigheternas originalkälla.';
+  assessment.appendChild(disclaimer);
 }
 
 function renderRouteOnMap() {
   routeLayer.clearLayers();
+  routeFollowMarker = null;
   corridorLine = null;
   if (!state.currentRouteData || !state.currentRouteData.geometry) return;
 
@@ -569,6 +595,34 @@ function renderRouteOnMap() {
     lineJoin: 'round'
   }).addTo(routeLayer);
 
+  for (const zone of state.currentRouteData.routeAreas || []) {
+    if (!Array.isArray(zone.line) || zone.line.length < 2) continue;
+    const points = zone.line.map(([lon, lat]) => [lat, lon]);
+    const color = zone.kind === 'security-zone' ? '#b42332' : zone.kind === 'organized-crime-area' ? '#7946a8' : '#c27a13';
+    L.polyline(points, { color, weight: 11, opacity: 0.8, lineCap: 'round', lineJoin: 'round' })
+      .bindPopup('<strong>' + esc(zone.category) + ' · ' + esc(zone.name) + '</strong><br>' + esc(zone.sourceTitle) + '<br><a href="' + esc(zone.sourceUrl) + '" target="_blank" rel="noopener">Öppna myndighetskällan ↗</a>')
+      .addTo(routeLayer);
+  }
+
+  for (const item of state.currentRouteData.trafficNearRoute || []) {
+    const geometry = item.geometry?.type === 'Feature' ? item.geometry : item.geometry?.type ? { type: 'Feature', geometry: item.geometry, properties: {} } : null;
+    if (geometry && ['Point', 'MultiPoint', 'LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'].includes(geometry.geometry.type)) {
+      L.geoJSON(geometry, { style: { color: '#dc6d25', weight: 4, fillOpacity: 0.12 }, pointToLayer: (_feature, latlng) => L.circleMarker(latlng, { radius: 6, color: '#dc6d25', fillColor: '#fff', fillOpacity: 1, weight: 3 }) })
+        .bindPopup('<strong>' + esc(item.title) + '</strong><br>' + esc(item.location || item.road || '') + '<br>Trafikverkets kartuppgift · <a href="' + esc(item.source) + '" target="_blank" rel="noopener">Öppna källa ↗</a>')
+        .addTo(routeLayer);
+    }
+  }
+
+  for (const item of state.currentRouteData.weatherAlongRoute || []) {
+    const geometry = item.geometry?.type === 'Feature' ? item.geometry : item.geometry?.type ? { type: 'Feature', geometry: item.geometry, properties: {} } : null;
+    if (!geometry || !['Polygon', 'MultiPolygon'].includes(geometry.geometry.type)) continue;
+    const level = String(item.level || '').toUpperCase();
+    const color = level === 'RED' ? '#b42332' : level === 'ORANGE' ? '#d45d20' : level === 'YELLOW' ? '#b27a13' : '#276fc0';
+    L.geoJSON(geometry, { style: { color, weight: 2, fillColor: color, fillOpacity: 0.16 } })
+      .bindPopup('<strong>' + esc(item.levelLabel || 'SMHI-varning') + ' · ' + esc(item.title) + '</strong><br>' + esc(item.area || '') + '<br><a href="' + esc(item.source) + '" target="_blank" rel="noopener">Öppna SMHI:s källa ↗</a>')
+      .addTo(routeLayer);
+  }
+
   // Start & Mål markörer
   if (coords.length) {
     L.circleMarker(coords[0], { radius: 7, color: '#10b981', fillColor: '#10b981', fillOpacity: 1 })
@@ -586,24 +640,104 @@ function renderRouteOnMap() {
       if (!inc.location?.gps) continue;
       L.circleMarker(inc.location.gps, {
         radius: 9,
-        color: '#ef4444',
-        fillColor: '#ef4444',
-        fillOpacity: 0.8
+        color: '#a34e32',
+        fillColor: '#fff',
+        fillOpacity: 1,
+        weight: 3
       })
-        .bindPopup(`<b>${esc(inc.type)}</b><br>${esc(inc.summary)}<br><small>${inc.distanceFromRouteMeters}m från rutt</small>`)
+        .bindPopup('<b>' + esc(inc.type) + '</b><br>' + esc(inc.summary) + '<br><small>' + esc(inc.location.name || 'Berört område') + ' · kartpunkten är ungefärlig och kan visa kommunens eller länets mittpunkt.</small>')
         .addTo(routeLayer);
     }
   }
 
+  if (state.followPosition) routeFollowMarker = L.circleMarker(state.followPosition, { radius: 8, color: '#156c58', fillColor: '#46c59c', fillOpacity: 1, weight: 3 }).bindTooltip('Din GPS-position').addTo(routeLayer);
   map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
 }
 
 let routeRevision = 0;
+let routeFollowMarker = null;
+function clientRoutePosition(lat, lon, coordinates) {
+  let minimum = Infinity, nearestProgress = 0, routeDistance = 0;
+  const yScale = 110540, xScale = 111320 * Math.cos(lat * Math.PI / 180);
+  const px = lon * xScale, py = lat * yScale;
+  for (let i = 1; i < coordinates.length; i++) {
+    const [lon1, lat1] = coordinates[i - 1], [lon2, lat2] = coordinates[i];
+    const x1 = lon1 * xScale, y1 = lat1 * yScale, x2 = lon2 * xScale, y2 = lat2 * yScale;
+    const dx = x2 - x1, dy = y2 - y1;
+    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy || 1)));
+    const segmentDistance = Math.hypot(px - x1 - t * dx, py - y1 - t * dy);
+    const segmentMeters = nearbyDistanceMeters({ lat: lat1, lon: lon1 }, { lat: lat2, lon: lon2 });
+    if (segmentDistance < minimum) { minimum = segmentDistance; nearestProgress = routeDistance + segmentMeters * t; }
+    routeDistance += segmentMeters;
+  }
+  return { distanceMeters: minimum, progressMeters: nearestProgress };
+}
+
+function startRouteFollow() {
+  if (!state.currentRouteData?.geometry) { showToast('Beräkna en rutt innan du följer den.'); return; }
+  if (!navigator.geolocation) { showToast('GPS stöds inte i den här webbläsaren.'); return; }
+  state.routeFollowActive = true;
+  $('#btn-route-follow').hidden = true;
+  $('#btn-route-stop').hidden = false;
+  $('#route-follow-status').hidden = false;
+  $('#route-follow-status').textContent = 'Begär GPS. Positionen används medan den här sidan är öppen.';
+  resumeRouteFollow();
+}
+
+function pauseRouteFollow() {
+  if (state.routeFollowWatch !== null) navigator.geolocation?.clearWatch(state.routeFollowWatch);
+  state.routeFollowWatch = null;
+  clearInterval(state.routeFollowTimer);
+  state.routeFollowTimer = null;
+  if (state.routeFollowActive) $('#route-follow-status').textContent = 'GPS och källuppdatering pausade medan sidan inte är synlig.';
+}
+
+function resumeRouteFollow() {
+  if (!state.routeFollowActive || document.hidden || !navigator.geolocation || state.routeFollowWatch !== null) return;
+  state.routeFollowWatch = navigator.geolocation.watchPosition(position => {
+    const { latitude, longitude, accuracy } = position.coords;
+    state.followPosition = [latitude, longitude];
+    const geometry = state.currentRouteData?.geometry?.coordinates || [];
+    const positionOnRoute = geometry.length > 1 ? clientRoutePosition(latitude, longitude, geometry) : null;
+    const offRoute = positionOnRoute && accuracy <= 200 && positionOnRoute.distanceMeters > Math.max(150, accuracy);
+    $('#route-off-course').hidden = !offRoute;
+    $('#btn-reroute-current').hidden = !offRoute;
+    if (offRoute) $('#route-off-course').textContent = 'Du verkar ha lämnat rutten. Kontrollera läget och välj om du vill beräkna en ny rutt från din position.';
+    const activeZone = (state.currentRouteData?.routeAreas || []).find(zone => positionOnRoute?.progressMeters >= zone.startMeters && positionOnRoute?.progressMeters <= zone.endMeters);
+    const nextZone = (state.currentRouteData?.routeAreas || []).find(zone => zone.startMeters > (positionOnRoute?.progressMeters || 0));
+    const zoneMessage = activeZone ? ` · nu passerar ${activeZone.name}` : nextZone ? ` · nästa zon ${nextZone.name} om cirka ${Math.max(0, (nextZone.startMeters - positionOnRoute.progressMeters) / 1000).toFixed(1)} km` : '';
+    $('#route-follow-status').textContent = accuracy <= 200 ? `GPS aktiv · noggrannhet cirka ${Math.round(accuracy)} m${zoneMessage} · ${formatSwedishTime(position.timestamp)}` : 'GPS-signalen är osäker. Väntar på en bättre position.';
+    if (routeFollowMarker) routeFollowMarker.setLatLng(state.followPosition);
+    else if (state.currentRouteData) renderRouteOnMap();
+  }, error => {
+    $('#route-follow-status').textContent = error.code === 1 ? 'GPS-tillstånd saknas. Tillåt position i webbläsaren eller stoppa GPS.' : 'GPS-positionen kunde inte hämtas just nu.';
+  }, { enableHighAccuracy: true, maximumAge: 5_000, timeout: 15_000 });
+  state.routeFollowTimer = setInterval(() => calculateRoute({ refresh: true }), 60_000);
+}
+
+function stopRouteFollow() {
+  pauseRouteFollow();
+  state.routeFollowActive = false;
+  state.followPosition = null;
+  routeFollowMarker?.remove(); routeFollowMarker = null;
+  $('#btn-route-stop').hidden = true;
+  $('#btn-reroute-current').hidden = true;
+  $('#btn-route-follow').hidden = !state.currentRouteData;
+  $('#route-off-course').hidden = true;
+  $('#route-follow-status').hidden = false;
+  $('#route-follow-status').textContent = 'GPS-bevakningen är stoppad.';
+}
+
 function invalidateRoute() {
+  if (state.routeFollowActive) stopRouteFollow();
   routeRevision++;
   state.currentRouteData = null;
   $('#route-result').hidden = true;
   $('#btn-clear-route').hidden = true;
+  $('#btn-route-follow').hidden = true;
+  $('#btn-route-stop').hidden = true;
+  $('#btn-reroute-current').hidden = true;
+  $('#btn-route-view-map').hidden = true;
   routeLayer.clearLayers();
   corridorLine = null;
 }
@@ -1331,7 +1465,7 @@ function renderInformation() {
 }
 
 function setupNavigation() {
-  const tabs = [...$$('.nav-tab')];
+  const tabs = [...$$('.nav-tab[data-tab]')];
   tabs.forEach((tab, index) => {
     tab.id = 'tab-' + tab.dataset.tab;
     tab.setAttribute('role', 'tab'); tab.setAttribute('aria-controls', 'panel-' + tab.dataset.tab);
@@ -1346,9 +1480,9 @@ function setupNavigation() {
       if (next !== undefined) { event.preventDefault(); tabs[next].focus(); setActiveTab(tabs[next].dataset.tab); }
     });
   });
-  setActiveTab(location.hash.slice(1) || 'karta', false);
-  window.addEventListener('popstate', () => setActiveTab(location.hash.slice(1) || 'karta', false));
-  $$('[data-go]').forEach(button => button.addEventListener('click', () => { setActiveTab(button.dataset.go); $('#sidebar').focus(); }));
+  setActiveTab(location.hash.slice(1) || 'nara', false);
+  window.addEventListener('popstate', () => setActiveTab(location.hash.slice(1) || 'nara', false));
+  $$('[data-go]').forEach(button => button.addEventListener('click', () => { setActiveTab(button.dataset.go); $('#sidebar').focus(); $('#more-dialog')?.close(); }));
   $('#information-search').addEventListener('input', renderInformation);
   $('#btn-refresh-information').addEventListener('click', refreshInformation);
   $('#btn-clear-filters').addEventListener('click', () => {
@@ -1362,6 +1496,20 @@ function setupNavigation() {
     if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.incident-card')) { event.preventDefault(); event.target.click(); }
   });
   for (const id of ['route-mode', 'route-buffer']) document.getElementById(id).addEventListener('change', invalidateRoute);
+  $('#btn-route-follow').addEventListener('click', startRouteFollow);
+  $('#btn-route-stop').addEventListener('click', stopRouteFollow);
+  $('#btn-route-view-map').addEventListener('click', () => setMobileView(true));
+  $('#btn-reroute-current').addEventListener('click', () => {
+    if (!state.followPosition) return;
+    state.routeFrom = { name: 'Min aktuella position', lat: state.followPosition[0], lon: state.followPosition[1] };
+    $('#route-from').value = state.routeFrom.name;
+    calculateRoute();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!state.routeFollowActive) return;
+    if (document.hidden) pauseRouteFollow(); else resumeRouteFollow();
+  });
+  setupNearbySearch();
   $('#btn-view-content').addEventListener('click', () => setMobileView(false));
   $('#btn-view-map').addEventListener('click', () => setMobileView(true));
 }
@@ -1384,6 +1532,7 @@ function init() {
   // Fliknavigering
   $$('.nav-tab').forEach(tab => {
     tab.addEventListener('click', () => {
+      if (tab.id === 'btn-more') { $('#more-dialog').showModal(); return; }
       setActiveTab(tab.dataset.tab);
     });
   });
@@ -1471,6 +1620,17 @@ function init() {
   $('#btn-close-sources').addEventListener('click', () => $('#sources-dialog').close());
   $('#btn-legal').addEventListener('click', openLegalModal);
   $('#btn-close-legal').addEventListener('click', () => $('#legal-dialog').close());
+  $('#btn-close-more').addEventListener('click', () => $('#more-dialog').close());
+  const savedTheme = localStorage.getItem('tryggpuls_theme') === 'dark' ? 'dark' : 'light';
+  document.body.dataset.theme = savedTheme;
+  $('#btn-theme-toggle').textContent = savedTheme === 'dark' ? 'Byt till ljust tema' : 'Byt till mörkt tema';
+  $('#btn-theme-toggle').addEventListener('click', () => {
+    const next = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.body.dataset.theme = next;
+    localStorage.setItem('tryggpuls_theme', next);
+    $('#btn-theme-toggle').textContent = next === 'dark' ? 'Byt till ljust tema' : 'Byt till mörkt tema';
+  });
+  for (const dialog of ['more-dialog', 'sources-dialog', 'legal-dialog']) document.getElementById(dialog).addEventListener('click', event => { if (event.target === event.currentTarget) event.currentTarget.close(); });
 
   // Initiera underfunktioner
   setupRouteSearch();
@@ -1496,4 +1656,147 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
   init();
+}
+function nearbyDistanceMeters(a, b) {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function pointInRing(point, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > point.lat) !== (yj > point.lat) && point.lon < ((xj - xi) * (point.lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function nearbyGeometryContains(geometry, point) {
+  if (!geometry) return false;
+  if (geometry.type === 'Feature') return nearbyGeometryContains(geometry.geometry, point);
+  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.type === 'MultiPolygon' ? geometry.coordinates : [];
+  return polygons.some(rings => pointInRing(point, rings[0]) && !rings.slice(1).some(ring => pointInRing(point, ring)));
+}
+
+function setupNearbySearch() {
+  const input = $('#nearby-query'), suggestions = $('#nearby-suggestions');
+  $('#nearby-overview').addEventListener('click', loadStationHours);
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('tryggpuls_nearby_place') || 'null'); } catch { return null; } })();
+  const choosePlace = (point, label, remember) => {
+    state.nearbyPoint = point; state.nearbyLabel = label;
+    renderNearbyMap(point, []);
+    map.setView([point.lat, point.lon], 13);
+    $('#nearby-place-label').textContent = `Vald plats: ${label}${point.gps ? ' · GPS, endast i den här sessionen' : ''}`;
+    $('#btn-nearby-refresh').hidden = false;
+    if (remember) { try { localStorage.setItem('tryggpuls_nearby_place', JSON.stringify({ lat: point.lat, lon: point.lon, name: label })); } catch {} }
+    suggestions.hidden = true; refreshNearby();
+  };
+  const search = async () => {
+    const query = input.value.trim();
+    if (query.length < 2) { $('#nearby-place-label').textContent = 'Skriv minst två tecken för att söka en ort.'; return; }
+    $('#btn-nearby-search').disabled = true; $('#btn-nearby-search').textContent = 'Söker…';
+    suggestions.hidden = false; suggestions.textContent = 'Söker platser…';
+    try {
+      const response = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`), data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Platsökningen misslyckades');
+      suggestions.innerHTML = (data.results || []).map((place, index) => `<button class="suggestion-item" type="button" data-index="${index}">${esc(place.displayName)}</button>`).join('') || '<p>Ingen plats hittades. Lägg till ort eller kommun och försök igen.</p>';
+      suggestions._results = data.results || [];
+    } catch (error) { suggestions.textContent = `${error.message}. Försök igen.`; }
+    finally { $('#btn-nearby-search').disabled = false; $('#btn-nearby-search').textContent = 'Sök'; }
+  };
+  $('#btn-nearby-search').addEventListener('click', search);
+  input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); search(); } });
+  suggestions.addEventListener('click', event => {
+    const button = event.target.closest('[data-index]'); if (!button) return;
+    const place = suggestions._results?.[Number(button.dataset.index)]; if (!place) return;
+    input.value = place.displayName;
+    choosePlace({ lat: place.lat, lon: place.lon, city: place.city }, place.displayName, true);
+  });
+  $('#btn-nearby-gps').addEventListener('click', () => {
+    if (!navigator.geolocation) { $('#nearby-place-label').textContent = 'GPS stöds inte i webbläsaren. Sök en ort i stället.'; return; }
+    $('#btn-nearby-gps').disabled = true; $('#btn-nearby-gps').textContent = 'Hämtar position…';
+    navigator.geolocation.getCurrentPosition(async position => {
+      const point = { lat: position.coords.latitude, lon: position.coords.longitude, gps: true };
+      let label = 'Min aktuella position';
+      try { const response = await fetch(`/api/reverse-geocode?lat=${point.lat}&lon=${point.lon}`); const data = await response.json(); if (data.address) label = data.address; } catch {}
+      input.value = label; choosePlace(point, label, false);
+      $('#btn-nearby-gps').disabled = false; $('#btn-nearby-gps').textContent = 'Använd min position';
+    }, error => {
+      $('#nearby-place-label').textContent = error.code === 1 ? 'Positionstillstånd avvisades. Du kan söka en ort utan GPS.' : 'Positionen kunde inte hämtas. Du kan söka en ort i stället.';
+      $('#btn-nearby-gps').disabled = false; $('#btn-nearby-gps').textContent = 'Använd min position';
+    }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 });
+  });
+  $('#btn-nearby-refresh').addEventListener('click', refreshNearby);
+  if (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon) && typeof saved.name === 'string') {
+    input.value = saved.name; choosePlace({ lat: saved.lat, lon: saved.lon, city: saved.name }, saved.name, false);
+  }
+}
+
+let nearbyPending = false;
+async function refreshNearby() {
+  if (!state.nearbyPoint || nearbyPending) return;
+  nearbyPending = true;
+  $('#nearby-overview').setAttribute('aria-busy', 'true');
+  $('#nearby-overview').innerHTML = '<p>Hämtar relevanta myndighetskällor…</p>';
+  const shelterUrl = `/api/shelters?lat=${encodeURIComponent(state.nearbyPoint.lat)}&lon=${encodeURIComponent(state.nearbyPoint.lon)}&radius=2000`;
+  const urls = ['/api/events', '/api/weather-warnings', '/api/crisis-updates', '/api/traffic', '/api/police-stations', shelterUrl];
+  const results = await Promise.allSettled(urls.map(async url => { const response = await fetch(url); const data = await response.json(); if (!response.ok && !data.fetchedAt) throw new Error(data.error || 'Källan svarar inte'); return data; }));
+  const data = Object.fromEntries(urls.map((url, index) => [url, results[index].status === 'fulfilled' ? results[index].value : { items: [], stale: true, error: results[index].reason?.message }]));
+  const point = state.nearbyPoint, label = state.nearbyLabel.toLocaleLowerCase('sv');
+  const areaMatches = area => String(area || '').toLocaleLowerCase('sv').split(/[,;·]/).some(part => { const value = part.trim(); return value.length > 2 && (label.includes(value) || value.includes(label.split(',').at(-1)?.trim())); });
+  const events = (data['/api/events'].events || []).filter(event => event.location?.gps && nearbyDistanceMeters(point, { lat: event.location.gps[0], lon: event.location.gps[1] }) < 18000).slice(0, 8);
+  const warnings = (data['/api/weather-warnings'].items || []).filter(item => nearbyGeometryContains(item.geometry, point) || areaMatches(item.area));
+  const crisis = [...(data['/api/crisis-updates'].vmas || []), ...(data['/api/crisis-updates'].notices || [])].filter(item => areaMatches(item.area));
+  const traffic = (data['/api/traffic'].items || []).filter(item => {
+    if (nearbyGeometryContains(item.geometry, point)) return true;
+    const geometry = item.geometry?.type === 'Feature' ? item.geometry.geometry : item.geometry;
+    const points = [];
+    const walk = value => { if (Array.isArray(value) && typeof value[0] === 'number' && typeof value[1] === 'number') points.push(value); else if (Array.isArray(value)) value.forEach(walk); };
+    walk(geometry?.coordinates);
+    return points.some(([lon, lat]) => nearbyDistanceMeters(point, { lat, lon }) < 8000);
+  }).slice(0, 6);
+  const stationsData = data['/api/police-stations'];
+  state.policeStations = (stationsData.items || []).map(station => ({ ...station, distance: nearbyDistanceMeters(point, { lat: station.lat, lon: station.lon }) })).sort((a, b) => a.distance - b.distance).slice(0, 3);
+  const sheltersData = data[shelterUrl] || { items: [], stale: true, error: 'Skyddsrumsregistret kunde inte hämtas.' };
+  const shelters = sheltersData.items || [];
+  renderNearbyMap(point, shelters);
+  const sourceLabels = { '/api/events': 'polisnotiser', '/api/weather-warnings': 'SMHI', '/api/crisis-updates': 'Krisinformation', '/api/traffic': 'Trafikverket', '/api/police-stations': 'polisstationer' };
+  const sourceWarnings = urls.flatMap((url, index) => results[index].status === 'rejected' || data[url].stale ? [`${sourceLabels[url] || 'skyddsrum'}: informationen kan vara fördröjd`] : []);
+  const eventCards = events.length ? events.map(event => `<article class="nearby-card"><strong>${esc(event.type)} · ${esc(event.name)}</strong><p>${esc(event.summary)}</p><small>${esc(event.location?.name || '')} · ${esc(formatSwedishTime(event.ts))} · kartpunkten anger ungefärligt område</small>${event.url ? `<a href="${esc(event.url)}" target="_blank" rel="noopener">Polisnotis ↗</a>` : ''}</article>`).join('') : '<p>Inga polisnotiser matchade den valda platsens grova område.</p>';
+  const warningsHtml = warnings.length ? warnings.map(item => `<article class="nearby-card"><strong>${esc(item.levelLabel || 'Varning')} · ${esc(item.title)}</strong><p>${esc(item.area || '')}${item.validTo ? ` · gäller till ${esc(formatSwedishTime(Date.parse(item.validTo)))}` : ''}</p><a href="${esc(item.source)}" target="_blank" rel="noopener">SMHI ↗</a></article>`).join('') : '<p>Inga geografiskt matchande SMHI-varningar i den senast hämtade datan.</p>';
+  const crisisHtml = crisis.length ? crisis.map(item => `<article class="nearby-card"><strong>${esc(item.type === 'vma' ? 'VMA' : 'Krisnotis')} · ${esc(item.title)}</strong><p>${esc(item.area || 'Område framgår inte av källan')}</p><a href="${esc(item.source)}" target="_blank" rel="noopener">Krisinformation ↗</a></article>`).join('') : '<p>Inga lokalt matchande VMA eller krisnotiser i källans svar.</p>';
+  const trafficHtml = traffic.length ? traffic.map(item => `<article class="nearby-card"><strong>${esc(item.title)}</strong><p>${esc(item.description || item.location || '')}</p><small>${item.modifiedAt ? `Uppdaterad ${esc(formatSwedishTime(Date.parse(item.modifiedAt)))}` : 'Trafikverkets rapport'}</small></article>`).join('') : '<p>Inga matchande trafikstörningar med tillgänglig geometri.</p>';
+  const stationsHtml = state.policeStations.length ? state.policeStations.map(station => `<article class="nearby-card"><strong>${esc(station.name)}</strong><p>${esc(station.address)} · ${station.distance < 1000 ? `${Math.round(station.distance)} m` : `${(station.distance / 1000).toFixed(1)} km`} från vald plats</p><details><summary>Tjänster och öppettider</summary><p>${(station.services || []).map(service => esc(service)).join(' · ')}</p><button class="btn-subtle station-hours" data-station="${esc(station.id)}">Hämta öppettider</button><div class="station-hours-result" id="station-hours-${esc(station.id)}"></div></details><a href="https://www.google.com/maps/dir/?api=1&destination=${station.lat},${station.lon}" target="_blank" rel="noopener">Vägbeskrivning ↗</a> · <a href="${esc(station.url)}" target="_blank" rel="noopener">Polisens stationssida ↗</a></article>`).join('') : '<p>Polisens stationsregister kunde inte hämtas.</p>';
+  const sheltersHtml = shelters.length ? shelters.map(shelter => `<article class="nearby-card"><strong>Skyddsrum ${esc(shelter.code || shelter.id)}</strong><p>${shelter.distanceMeters < 1000 ? `${shelter.distanceMeters} m` : `${(shelter.distanceMeters / 1000).toFixed(1)} km`} från vald plats${shelter.capacity ? ` · registrerad kapacitet ${shelter.capacity} personer` : ''}</p><a href="https://www.google.com/maps/dir/?api=1&destination=${shelter.lat},${shelter.lon}" target="_blank" rel="noopener">Vägbeskrivning ↗</a></article>`).join('') : sheltersData.status === 'unavailable' ? `<p>${esc(sheltersData.error || 'Skyddsrumsregistret svarar inte just nu.')}</p>` : '<p>Inga registrerade skyddsrum hittades inom 2 km.</p>';
+  const shelterNote = sheltersData.incomplete ? ' Resultatet kan vara begränsat av datakällan.' : '';
+  const sourceWarningsFinal = [...new Set(sourceWarnings)];
+  $('#nearby-overview').innerHTML = `<p class="nearby-updated">Källkontroll ${formatSwedishTime(Date.now())}${sourceWarningsFinal.length ? ` · ${esc(sourceWarningsFinal.join(' · '))}` : ''}</p><section><h2>Polisnotiser i närheten</h2>${eventCards}<p class="nearby-precision">Notiserna kan vara fördröjda. Polisen anger berörd kommun eller län, inte alltid exakt händelseplats.</p></section><section><h2>Vädervarningar</h2>${warningsHtml}</section><section><h2>VMA och krisnotiser</h2>${crisisHtml}</section><section><h2>Trafik</h2>${trafficHtml}</section><section><h2>Närmaste polisstationer</h2>${stationsHtml}</section><section><h2>Skyddsrum nära platsen</h2>${sheltersHtml}<p class="nearby-precision">Registerplats och angiven kapacitet från MCF${shelterNote}. Uppgifterna visar inte om skyddsrummet är öppet eller tillgängligt just nu. Kontrollera alltid myndighetens information.</p></section><p class="nearby-precision">Urvalet saknar garanti om full täckning. Kontrollera alltid informationen hos ansvarig myndighet.</p>`;
+  $('#nearby-overview').setAttribute('aria-busy', 'false');
+  nearbyPending = false;
+}
+
+function renderNearbyMap(point, shelters) {
+  nearbyLayer.clearLayers();
+  L.circleMarker([point.lat, point.lon], { radius: 8, color: '#195f50', fillColor: '#38a989', fillOpacity: 1, weight: 3 })
+    .bindTooltip('Vald plats', { direction: 'top' }).addTo(nearbyLayer);
+  for (const shelter of shelters) {
+    L.circleMarker([shelter.lat, shelter.lon], { radius: 5, color: '#315c96', fillColor: '#fff', fillOpacity: 1, weight: 2 })
+      .bindPopup(`<strong>Skyddsrum ${esc(shelter.code || shelter.id)}</strong><br>${shelter.distanceMeters} m från vald plats${shelter.capacity ? `<br>Registrerad kapacitet: ${shelter.capacity}` : ''}<br><a href="${esc(shelter.source)}" target="_blank" rel="noopener">Öppna MCF:s register ↗</a>`)
+      .addTo(nearbyLayer);
+  }
+}
+
+async function loadStationHours(event) {
+  const button = event.target.closest('.station-hours');
+  if (!button) return;
+  const container = document.getElementById(`station-hours-${button.dataset.station}`);
+  button.disabled = true; button.textContent = 'Hämtar…';
+  try {
+    const response = await fetch(`/api/police-stations/${encodeURIComponent(button.dataset.station)}`), data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Kunde inte hämta öppettider');
+    container.innerHTML = data.services.map(service => `<p><strong>${esc(service.name)}</strong><br>${service.openingHours.map(day => `${esc(day.name)} ${day.isClosed ? 'stängt' : `${esc(day.from?.slice(11, 16) || '')}–${esc(day.to?.slice(11, 16) || '')}`}`).join('<br>')}</p>`).join('');
+    button.hidden = true;
+  } catch (error) { container.textContent = error.message; button.disabled = false; button.textContent = 'Försök igen'; }
 }
