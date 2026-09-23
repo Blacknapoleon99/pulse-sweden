@@ -79,7 +79,9 @@ fetch('/api/map-config').then(response => response.json()).then(config => {
     failed = true; map.removeLayer(carto); tileLayer.addTo(map);
     showToast('CARTO svarar inte. Visar OpenStreetMap som reservkarta.');
   });
-  map.removeLayer(tileLayer); carto.addTo(map);
+  // Keep OSM underneath until all CARTO tiles for this view are ready.
+  carto.once('load', () => { if (!failed) map.removeLayer(tileLayer); });
+  carto.addTo(map);
 }).catch(() => {});
 
 // Fallback till OpenStreetMap om CartoDB skulle blockeras.
