@@ -84,3 +84,10 @@ export function createRouteFollowController({
     get refreshing() { return refreshTimer !== null; }
   };
 }
+
+export function bindRouteFollowPageHide(getController, target = globalThis.window) {
+  if (typeof getController !== 'function' || typeof target?.addEventListener !== 'function') return () => {};
+  const stopWhenPageHides = () => getController()?.stop('pagehide');
+  target.addEventListener('pagehide', stopWhenPageHides);
+  return () => target.removeEventListener?.('pagehide', stopWhenPageHides);
+}

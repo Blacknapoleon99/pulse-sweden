@@ -1,4 +1,4 @@
-import { createRouteFollowController } from './route-follow.js';
+import { bindRouteFollowPageHide, createRouteFollowController } from './route-follow.js';
 
 // TryggPuls — Sveriges Digitala Trygghetsplattform
 // 100% Officiella Data · Polisen, BRÅ, OSRM, Nominatim, Domstolsverket
@@ -1606,6 +1606,7 @@ function setupNavigation() {
     if (!state.routeFollowActive) return;
     if (document.hidden) pauseRouteFollow(); else resumeRouteFollow();
   });
+  bindRouteFollowPageHide(() => routeFollowController, window);
   setupNearbySearch();
   $('#btn-view-content').addEventListener('click', () => setMobileView(false));
   $('#btn-view-map').addEventListener('click', () => setMobileView(true));

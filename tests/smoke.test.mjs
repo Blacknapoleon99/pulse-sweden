@@ -22,7 +22,7 @@ test('HTTP routing, input validation, health, HEAD and private files', async () 
     assert.equal((await fetch(base + '/family-client.js')).status, 200);
     assert.equal((await fetch(base + '/route-follow.js')).status, 200);
     assert.match(await (await fetch(base + '/route-follow.js')).text(), /createRouteFollowController/);
-    const clientBundle = await fetch(base + '/app.js?v=8');
+    const clientBundle = await fetch(base + '/app.js?v=9');
     assert.equal(clientBundle.status, 200);
     assert.doesNotMatch(await clientBundle.text(), /TRAFIKVERKET_API_KEY|ZONE_ADMIN_TOKEN/);
     assert.equal((await fetch(base + '/family-sw.js')).status, 200);

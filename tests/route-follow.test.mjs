@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createRouteFollowController } from '../route-follow.js';
+import { bindRouteFollowPageHide, createRouteFollowController } from '../route-follow.js';
 
 function fakeLocation() {
   const watches = new Map(), cleared = [], intervals = new Map(), clearedIntervals = [];
@@ -103,4 +103,24 @@ test('temporary GPS loss keeps route follow active and accepts a later position'
   controller.stop();
   assert.equal(fake.watches.size, 0);
   assert.equal(fake.intervals.size, 0);
+});
+
+test('pagehide stops route GPS and source refresh timers', () => {
+  const fake = fakeLocation();
+  const listeners = new Map();
+  const page = {
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    removeEventListener(type, listener) { if (listeners.get(type) === listener) listeners.delete(type); }
+  };
+  const controller = createRouteFollowController({ geolocation: fake.geolocation, setIntervalFn: fake.setIntervalFn, clearIntervalFn: fake.clearIntervalFn });
+  const unbind = bindRouteFollowPageHide(() => controller, page);
+  controller.start();
+  listeners.get('pagehide')();
+  assert.equal(controller.active, false);
+  assert.equal(controller.watching, false);
+  assert.equal(controller.refreshing, false);
+  assert.equal(fake.watches.size, 0);
+  assert.equal(fake.intervals.size, 0);
+  unbind();
+  assert.equal(listeners.has('pagehide'), false);
 });
