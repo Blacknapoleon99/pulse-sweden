@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "TryggPuls Demo",
+    "slug": "tryggpuls-demo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "description": "Expo Go-prototyp för TryggPuls med karta, polisnotiser och ruttanalys.",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": { "predictiveBackGestureEnabled": false },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "TryggPuls använder din plats när du väljer att se information nära dig."
+        }
+      ]
+    ]
+  }
+}

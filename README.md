@@ -5,6 +5,10 @@
 
 TryggPuls visar publicerade myndighetsuppgifter, historisk statistik och öppna kartdata för Sverige. Polisnotiser är ett urval; kartpunkter är ofta områdescentrum. En tom lista är ingen trygghetsgaranti. Företagsvyn innehåller tydligt märkta exempelarbetsplatser.
 
+## Expo Go-prototyp
+
+En fristående mobil demo för Expo SDK 57 finns i [`mobile/`](mobile/README.md). Starta den med `cd mobile`, `npm ci` och `npm start`. Den använder de publika API:erna i webbservern och visar karta, polisnotiser och ruttanalys i ett native gränssnitt. Familjefunktioner och bakgrundsposition ingår inte i Expo Go-demon.
+
 ## API och drift (uppdaterat 2026-09-24)
 
 Publika informationsendpoints stöder GET och HEAD. Informationsflöden anger `fetchedAt`, `stale` och felstatus. Första källfelet ger 503; finns tidigare data visas den med en fördröjningsmarkering. Delvis fel i krisflödet bevarar VMA och notiser var för sig.
