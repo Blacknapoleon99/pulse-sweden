@@ -145,29 +145,24 @@ function BulletinCard({
   );
 }
 
-function ReportRow({ event, onPress }: { event: Event; onPress: () => void }) {
+function EventTile({ event, onPress }: { event: Event; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      style={({ pressed }) => [styles.report, pressed && styles.pressed]}
+      accessibilityLabel={`${event.type}, ${event.name}, ${time(event.ts)}`}
+      style={({ pressed }) => [styles.eventTile, pressed && styles.pressed]}
     >
-      <View style={styles.reportMark}>
-        <Ionicons name="pulse" size={18} color="#CE7950" />
+      <View style={styles.eventIcon}>
+        <Ionicons name="pulse-outline" size={18} color="#C46E45" />
       </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.reportTitle} numberOfLines={1}>
-          {event.type} · {event.name}
-        </Text>
-        <Text style={styles.body} numberOfLines={2}>
-          {event.summary}
-        </Text>
-        <Text style={styles.meta}>
-          {event.location?.name || "Område"} · {time(event.ts)} · ungefärlig
-          plats
-        </Text>
-      </View>
-      <Ionicons name="chevron-forward" size={17} color="#93A2B3" />
+      <Text style={styles.eventType} numberOfLines={2}>
+        {event.type || "Händelse"}
+      </Text>
+      <Text style={styles.eventTime}>{time(event.ts)}</Text>
+      <Text style={styles.eventPlace} numberOfLines={1}>
+        {event.location?.name || event.name || "Område"}
+      </Text>
     </Pressable>
   );
 }
@@ -239,11 +234,10 @@ export function Dashboard(props: Props) {
 
         {isHome ? (
           <>
-            <Text style={styles.eyebrow}>DIN ÖVERBLICK</Text>
-            <Text style={styles.heading}>Trygghet börjar med överblick.</Text>
+            <Text style={styles.eyebrow}>HEM · DIN ÖVERBLICK</Text>
+            <Text style={styles.heading}>Det viktigaste, på ett ställe.</Text>
             <Text style={styles.intro}>
-              Händelser, varningar och viktiga uppdateringar samlade på ett
-              ställe.
+              Se aktuella källor och ta dig snabbt vidare.
             </Text>
             <Pressable
               style={styles.location}
@@ -259,43 +253,15 @@ export function Dashboard(props: Props) {
               <Ionicons name="chevron-forward" size={16} color={blue} />
             </Pressable>
             {!!notice && <Text style={styles.notice}>{notice}</Text>}
-            <View style={styles.hero}>
-              <View style={styles.heroHalo} />
-              <View style={styles.heroTop}>
-                <Ionicons name="radio-outline" size={21} color="#95EEE6" />
-                <Text style={styles.heroEyebrow}>
-                  {events?.stale
-                    ? "SENAST HÄMTADE LÄGESBILD"
-                    : "PUBLICERAD LÄGESBILD"}
-                </Text>
-                <View style={styles.heroDot} />
-              </View>
-              <Text style={styles.heroTitle}>
-                {events
-                  ? `${nearby.length} polisnotiser i området`
-                  : "Hämtar polisens notiser"}
-              </Text>
-              <Text style={styles.heroBody}>
-                Publicerade uppgifter nära{" "}
-                {hasLocation ? "din plats" : "kartans mitt"}. Positioner och
-                tider kan vara ungefärliga.
-              </Text>
-              <Pressable
-                style={styles.heroButton}
-                onPress={() => go("map")}
-                accessibilityRole="button"
-              >
-                <Text style={styles.heroButtonText}>Utforska kartan</Text>
-                <Ionicons name="arrow-forward" size={17} color={navy} />
-              </Pressable>
-            </View>
-            <SectionTitle title="Genvägar" />
+            <SectionTitle title="Snabböversikt" />
             <View style={styles.actions}>
               <ActionTile
                 icon="notifications-outline"
                 label="Varningar"
                 detail={
-                  crisis || weather ? `${alertCount} i flödena` : "Hämtar…"
+                  crisis || weather
+                    ? `${alertCount} i flödena · ${urgent[0]?.title || weatherItems[0]?.title || "Se läget"}`
+                    : "Hämtar…"
                 }
                 tint="#FFE9E1"
                 onPress={() => go("alerts")}
@@ -303,58 +269,88 @@ export function Dashboard(props: Props) {
               <ActionTile
                 icon="people-outline"
                 label="Familj"
-                detail="Platser & delning"
+                detail="Platser och delning på webben"
                 tint="#E9E9FF"
                 onPress={() => go("family")}
               />
               <ActionTile
                 icon="newspaper-outline"
-                label="Viktigt"
+                label="Viktiga nyheter"
                 detail={
-                  news || zoneNews ? `${newsItems.length} nyheter` : "Hämtar…"
+                  news || zoneNews
+                    ? `${newsItems.length} i flödet · ${newsItems[0]?.title || "Se uppdateringar"}`
+                    : "Hämtar…"
                 }
                 tint="#E2F3F0"
                 onPress={() => go("news")}
               />
             </View>
             <SectionTitle
-              title="Senaste polisnotiser"
+              title="Händelser"
               action="Visa alla"
               onPress={() => go("events")}
             />
-            <View style={styles.card}>
+            <View style={styles.eventRow}>
               {nearby.length ? (
                 nearby
                   .slice(0, 3)
                   .map((event) => (
-                    <ReportRow
+                    <EventTile
                       key={event.id}
                       event={event}
                       onPress={() => openSource(event.url)}
                     />
                   ))
               ) : (
-                <Text style={styles.empty}>
+                <Text style={styles.emptyCard}>
                   {events
                     ? "Inga polisnotiser matchar det valda området i tillgängliga data."
                     : "Polisens händelser kunde inte hämtas just nu."}
                 </Text>
               )}
             </View>
-            <View style={styles.utilityRow}>
-              <Pressable style={styles.utility} onPress={() => go("route")}>
-                <Ionicons name="navigate-outline" size={20} color={blue} />
-                <Text style={styles.utilityText}>Planera rutt</Text>
-              </Pressable>
-              <Pressable
-                style={styles.utility}
+            <SectionTitle title="Chattar" />
+            <View style={styles.chatCard}>
+              <View style={styles.chatIcon}>
+                <Ionicons
+                  name="chatbubbles-outline"
+                  size={21}
+                  color="#675DBA"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.chatTitle}>Inga chattar i demon</Text>
+                <Text style={styles.body}>
+                  Familjens platser finns på webben. Meddelanden är inte
+                  anslutna till appen ännu.
+                </Text>
+              </View>
+            </View>
+            <SectionTitle title="Dina sidor" />
+            <View style={styles.actions}>
+              <ActionTile
+                icon="person-outline"
+                label="Profil"
+                detail="Konto och källor"
+                tint="#E7EFF9"
+                onPress={() => go("info")}
+              />
+              <ActionTile
+                icon="people-outline"
+                label="Familj"
+                detail="Hantera på webben"
+                tint="#E9E9FF"
+                onPress={() => go("family")}
+              />
+              <ActionTile
+                icon="stats-chart-outline"
+                label="Statistik"
+                detail="BRÅ och trygghetsdata"
+                tint="#E2F3F0"
                 onPress={() =>
                   openSource("https://tryggpuls.onrender.com/#bra")
                 }
-              >
-                <Ionicons name="stats-chart-outline" size={20} color={blue} />
-                <Text style={styles.utilityText}>Statistik ↗</Text>
-              </Pressable>
+              />
             </View>
             <Text style={styles.finePrint}>
               Uppgifter från myndighetskällor kan vara fördröjda. En tom lista
@@ -527,7 +523,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 29,
+    marginBottom: 16,
   },
   brand: { flexDirection: "row", alignItems: "center", gap: 9 },
   brandMark: {
@@ -555,18 +551,18 @@ const styles = StyleSheet.create({
   eyebrow: { fontSize: 10, fontWeight: "800", color: blue, letterSpacing: 1.8 },
   heading: {
     color: navy,
-    fontSize: 29,
-    lineHeight: 34,
+    fontSize: 25,
+    lineHeight: 29,
     fontWeight: "800",
     letterSpacing: -0.8,
     marginTop: 8,
   },
   intro: {
     color: muted,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 9,
-    marginBottom: 19,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 5,
+    marginBottom: 10,
   },
   location: {
     flexDirection: "row",
@@ -574,10 +570,10 @@ const styles = StyleSheet.create({
     gap: 7,
     alignSelf: "flex-start",
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     backgroundColor: "#E8F2FF",
     borderRadius: 16,
-    marginBottom: 17,
+    marginBottom: 13,
   },
   locationText: { color: blue, fontWeight: "700", fontSize: 12 },
   notice: {
@@ -589,56 +585,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 14,
   },
-  hero: {
-    backgroundColor: navy,
-    borderRadius: 27,
-    padding: 22,
-    overflow: "hidden",
-    marginBottom: 24,
-  },
-  heroHalo: {
-    position: "absolute",
-    top: -70,
-    right: -40,
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: "rgba(42,204,193,0.09)",
-  },
-  heroTop: { flexDirection: "row", alignItems: "center", gap: 8 },
-  heroEyebrow: {
-    flex: 1,
-    color: "#A8E7E6",
-    fontSize: 10,
-    letterSpacing: 1.5,
-    fontWeight: "800",
-  },
-  heroDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#48DDC7" },
-  heroTitle: {
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "800",
-    letterSpacing: -0.5,
-    marginTop: 22,
-  },
-  heroBody: { color: "#C1CDDC", fontSize: 13, lineHeight: 19, marginTop: 7 },
-  heroButton: {
-    backgroundColor: "#fff",
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 14,
-    marginTop: 18,
-  },
-  heroButtonText: { color: navy, fontWeight: "800", fontSize: 13 },
   sectionRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: 9,
     marginTop: 2,
   },
   sectionTitle: {
@@ -648,66 +599,87 @@ const styles = StyleSheet.create({
     letterSpacing: -0.4,
   },
   sectionAction: { color: blue, fontSize: 12, fontWeight: "800" },
-  actions: { flexDirection: "row", gap: 9, marginBottom: 26 },
+  actions: { flexDirection: "row", gap: 8, marginBottom: 17 },
   actionTile: {
     flex: 1,
-    minHeight: 118,
-    borderRadius: 20,
+    minHeight: 100,
+    borderRadius: 18,
     backgroundColor: "#fff",
-    padding: 12,
+    padding: 10,
     borderWidth: 1,
     borderColor: "#E7EDF5",
   },
   pressed: { opacity: 0.76, transform: [{ scale: 0.99 }] },
   tileIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 7,
+  },
+  tileLabel: { color: navy, fontSize: 11, fontWeight: "800" },
+  tileDetail: { color: muted, fontSize: 10, lineHeight: 13, marginTop: 3 },
+  eventRow: { flexDirection: "row", gap: 8, marginBottom: 17 },
+  eventTile: {
+    flex: 1,
+    minHeight: 108,
+    borderRadius: 17,
+    padding: 10,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#E7EDF5",
+  },
+  eventIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: "#FFF0E8",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 7,
+  },
+  eventType: { color: navy, fontSize: 11, fontWeight: "800", lineHeight: 14 },
+  eventTime: {
+    color: "#A4623E",
+    fontSize: 10,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  eventPlace: { color: muted, fontSize: 9, marginTop: 4 },
+  emptyCard: {
+    flex: 1,
+    color: muted,
+    backgroundColor: "#fff",
+    borderRadius: 17,
+    padding: 15,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  chatCard: {
+    flexDirection: "row",
+    gap: 11,
+    alignItems: "center",
+    padding: 12,
+    backgroundColor: "#fff",
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: "#E7EDF5",
+    marginBottom: 17,
+  },
+  chatIcon: {
     width: 37,
     height: 37,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 12,
+    backgroundColor: "#EDEBFF",
   },
-  tileLabel: { color: navy, fontSize: 12, fontWeight: "800" },
-  tileDetail: { color: muted, fontSize: 10, lineHeight: 13, marginTop: 3 },
-  card: {
-    borderRadius: 21,
-    backgroundColor: "#fff",
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: "#E7EDF5",
-  },
-  report: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 13,
-    borderBottomWidth: 1,
-    borderBottomColor: "#EDF1F6",
-  },
-  reportMark: {
-    width: 33,
-    height: 33,
-    borderRadius: 11,
-    backgroundColor: "#FFF0E8",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  reportTitle: { color: navy, fontSize: 13, fontWeight: "800" },
+  chatTitle: { color: navy, fontSize: 12, fontWeight: "800" },
   body: { color: muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
   meta: { color: "#8494A7", fontSize: 10, marginTop: 6 },
   empty: { color: muted, fontSize: 12, lineHeight: 18, paddingVertical: 15 },
-  finePrint: { color: "#7D8DA2", fontSize: 11, lineHeight: 16, marginTop: 19 },
-  utilityRow: { flexDirection: "row", gap: 9, marginTop: 14 },
-  utility: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    borderRadius: 15,
-    padding: 13,
-    backgroundColor: "#E9F2FF",
-  },
-  utilityText: { color: navy, fontSize: 12, fontWeight: "800" },
+  finePrint: { color: "#7D8DA2", fontSize: 10, lineHeight: 15, marginTop: 1 },
   back: {
     flexDirection: "row",
     alignItems: "center",

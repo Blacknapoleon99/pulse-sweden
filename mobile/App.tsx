@@ -611,12 +611,13 @@ function AppScreen() {
               )}
               {tab === "info" && (
                 <ScrollView style={s.scroll}>
-                  <Text style={s.kicker}>OM TJÄNSTEN</Text>
-                  <Text style={s.title}>Information med källor</Text>
+                  <Text style={s.kicker}>PROFIL & KÄLLOR</Text>
+                  <Text style={s.title}>Din profil i demon</Text>
                   <Text style={s.body}>
-                    TryggPuls visar publicerade svenska myndighetsuppgifter. Det
-                    är inte ett realtidslarm eller en säkerhetsgaranti.
+                    Mobilprototypen har inget eget inloggat konto ännu.
+                    Familjeprofil och delning hanteras i webbversionen.
                   </Text>
+                  <Text style={s.section}>Datakällor</Text>
                   <Source
                     label="Polisnotiser"
                     status={
@@ -671,7 +672,7 @@ function AppScreen() {
                 ["map", "map-outline", "Karta"],
                 ["events", "pulse-outline", "Händelser"],
                 ["route", "navigate-outline", "Rutt"],
-                ["info", "information-circle-outline", "Info"],
+                ["info", "person-outline", "Profil"],
               ] as const
             ).map(([id, icon, label]) => (
               <Pressable
