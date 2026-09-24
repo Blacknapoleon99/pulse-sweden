@@ -14,7 +14,7 @@ test('HTTP routing, input validation, health, HEAD and private files', async () 
     assert.match(homeHtml, /panel-information/);
     assert.match(homeHtml, /data-tab="nara"/);
     assert.match(homeHtml, /map-layers-panel/);
-    assert.match(homeHtml, /class="map-quick-actions"[\s\S]*?<button id="btn-reset-map"[^>]*>🇸🇪 Hela Sverige<\/button>/);
+    assert.match(homeHtml, /class="map-quick-actions"[\s\S]*?<button id="btn-reset-map"[^>]*>Hela Sverige<\/button>/);
     assert.match(homeHtml, /route-security-zones-list/);
     const css = await fetch(base + '/vendor/leaflet/leaflet.css');
     assert.equal(css.status, 200);
