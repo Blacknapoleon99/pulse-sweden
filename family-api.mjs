@@ -1,6 +1,7 @@
 import { createFamilyService } from './family.mjs';
 
 const attempts = new Map();
+const chatSentAt = new Map();
 function reply(req,res,status,payload,cookie) {
   const headers = { 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff' };
   if (cookie) headers['Set-Cookie'] = cookie;
@@ -30,13 +31,23 @@ export function createFamilyApi(options = {}) {
         if (attempts.size > 1000) attempts.clear();
         const data = await body(req);
         const result = url.pathname.endsWith('register') ? await service.register(data) : await service.login(data);
-        return reply(req,res,200,{user:result.user},service.cookie(result.token,process.env.NODE_ENV==='production'));
+        const native = req.headers['x-tryggpuls-client'] === 'native';
+        return reply(req,res,200,{user:result.user,...(native ? {token:result.token} : {})},service.cookie(result.token,process.env.NODE_ENV==='production'));
       }
       const user = await service.session(req);
       if (!user) return reply(req,res,401,{error:'Logga in för att använda familjefunktioner'});
       if (url.pathname === '/api/family/me' && req.method === 'GET') return reply(req,res,200,await service.overview(user));
+      if (url.pathname === '/api/family/messages' && req.method === 'GET') return reply(req,res,200,{messages:await service.listMessages(user)});
       if (req.method === 'POST') {
         const data = await body(req);
+        if (url.pathname === '/api/family/messages') {
+          const last = chatSentAt.get(user.id) || 0;
+          if (Date.now() - last < 1000) return reply(req,res,429,{error:'Vänta en sekund innan nästa meddelande'});
+          const message = await service.sendMessage(user,data.body);
+          chatSentAt.set(user.id,Date.now());
+          if (chatSentAt.size > 1000) chatSentAt.clear();
+          return reply(req,res,200,message);
+        }
         if (url.pathname === '/api/family/logout') { await service.logout(req); return reply(req,res,200,{ok:true},service.cookie('',process.env.NODE_ENV==='production')); }
         if (url.pathname === '/api/family/group') return reply(req,res,200,{id:await service.createGroup(user,data.name)});
         if (url.pathname === '/api/family/invite') return reply(req,res,200,{token:await service.invite(user)});

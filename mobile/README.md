@@ -1,6 +1,6 @@
 # TryggPuls – Expo Go demo
 
-Native prototype for Expo SDK **57.0.0** using the current SDK 57 patch (`expo@57.0.24`) and React Native 0.86.3. It is kept separate from the production web server in the repository root. Expo Go client **57.0.9** is a phone app version, not a project dependency; an installed client must support SDK 57.
+Native prototype for Expo SDK **57.0.0** using the current SDK 57 patch (`expo@57.0.25`) and React Native 0.86.3. It is kept separate from the production web server in the repository root. Expo Go client **57.0.9** is a phone app version, not a project dependency; an installed client must support SDK 57.
 
 ## Run on a phone
 
@@ -10,9 +10,9 @@ Native prototype for Expo SDK **57.0.0** using the current SDK 57 patch (`expo@5
 
 The app defaults to `https://tryggpuls.onrender.com` for public API data. To use a different backend, copy `.env.example` to `.env` and change `EXPO_PUBLIC_API_BASE_URL` to an HTTPS URL reachable from the phone. Do not use `localhost` unless the server is running on the phone itself. No service keys belong in `EXPO_PUBLIC_*` variables.
 
-The demo opens on a compact native home dashboard based on the supplied sketch. Warnings, family and important news sit at the top; three real police reports, a clearly marked chat placeholder, and Profile, Family and Statistics cards follow on the same scrollable page. Warning and news pages use Krisinformation, SMHI and Police feeds; family and statistics open the existing web flows. The map remains a separate tab with approximate police report markers, published police area and reviewed zone outlines when available. The app also includes a nearby report list, geocoded route analysis, source status, and foreground location on request. If the reviewed-zone database is not configured, the app labels that source unavailable. The starting addresses in the route screen are editable examples; no route is calculated until requested.
+The demo opens on a compact native home dashboard based on the supplied sketch. Warnings, family and important news sit at the top; three real police reports, a family-chat preview, and Profile, Family and Statistics cards follow on the same scrollable page. Warning and news pages use Krisinformation, SMHI and Police feeds. The native family screen uses the server's family accounts, shared zones, opted-in positions, alerts and chat. A family member's position is sent only on explicit request in Expo Go and expires after 15 minutes. The profile screen saves four geocoded places (home, school, work and leisure) in encrypted device storage and can send an address to route analysis. The statistics screen uses the server's BRÅ feed, nearby police notices and reviewed areas. The current BRÅ feed has only one reference year per municipality; the ten-year view links to BRÅ instead of inventing a trend. The map remains a separate tab with approximate police report markers and published zones when available.
 
-The prototype does **not** track family members, run in the background, or send safety push alerts. Expo Go does not support the required background location behavior. A production native build would require consent, authentication, background permission handling, and device testing. Police reports are delayed and their map points represent approximate areas.
+The prototype does **not** run location sharing in the background or send native safety push alerts. Expo Go does not support the required background location behavior. A production native build would require background permission handling and device testing. Police reports are delayed and their map points represent approximate areas. Family messages are available only to authenticated members of the same family; the server keeps them for 30 days. The backend must include the native bearer-token and chat endpoints for these features to work.
 
 ## Checks
 

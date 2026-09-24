@@ -1,3 +1,5 @@
+import * as SecureStore from "expo-secure-store";
+
 export const API_BASE = (
   process.env.EXPO_PUBLIC_API_BASE_URL || "https://tryggpuls.onrender.com"
 ).replace(/\/$/, "");
@@ -100,6 +102,93 @@ export type Passage = {
   stale?: boolean;
 };
 export type GeocodeResult = Point & { displayName: string; city?: string };
+export type FamilyOverview = {
+  user: {
+    id: string;
+    display_name: string;
+    email: string;
+    police_area_alerts?: boolean;
+  };
+  family: { id: string; name: string; owner_id: string } | null;
+  members: {
+    id: string;
+    display_name: string;
+    sharing: boolean;
+    lat?: number;
+    lon?: number;
+    accuracy?: number;
+    updated_at?: string;
+  }[];
+  zones: {
+    id: string;
+    name: string;
+    kind: "safe" | "watch";
+    lat: number;
+    lon: number;
+    radius: number;
+  }[];
+  alerts: {
+    id: string;
+    title: string;
+    detail: string;
+    created_at: string;
+    source_url?: string;
+  }[];
+};
+export type FamilyMessage = {
+  id: string;
+  sender_id: string;
+  sender_name: string;
+  body: string;
+  created_at: string;
+};
+export type BraStats = {
+  sourceUrl: string;
+  referenceYear?: string;
+  fetchedAt?: string;
+  stale?: boolean;
+  nationalAverage: { totalPer100k: number };
+  regions: {
+    region: string;
+    total: number;
+    totalPer100k: number;
+    rank: number;
+    riskIndex: string;
+  }[];
+};
+
+const SESSION_KEY = "tryggpuls-family-session";
+export const familyToken = () => SecureStore.getItemAsync(SESSION_KEY);
+export const clearFamilyToken = () => SecureStore.deleteItemAsync(SESSION_KEY);
+export async function familyRequest<T>(
+  path: string,
+  method = "GET",
+  value?: unknown,
+): Promise<T> {
+  if (
+    !API_BASE.startsWith("https://") &&
+    !API_BASE.startsWith("http://localhost")
+  )
+    throw new Error("Familjekontot kräver en HTTPS-server.");
+  const token = await familyToken();
+  const response = await fetch(`${API_BASE}/api/family/${path}`, {
+    method,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-TryggPuls-Action": "1",
+      "X-TryggPuls-Client": "native",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...(method === "GET" ? {} : { body: JSON.stringify(value || {}) }),
+  });
+  const data = await response.json();
+  if (!response.ok)
+    throw new Error(data.error || `Tjänsten svarade ${response.status}`);
+  if ((path === "login" || path === "register") && data.token)
+    await SecureStore.setItemAsync(SESSION_KEY, data.token);
+  return data as T;
+}
 
 export async function getJson<T>(
   path: string,

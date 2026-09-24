@@ -346,12 +346,17 @@ function AppScreen() {
           />
         )}
       </MapView>
-      {(["home", "alerts", "news", "family"] as Tab[]).includes(tab) && (
+      {(
+        ["home", "alerts", "news", "family", "stats", "info"] as Tab[]
+      ).includes(tab) && (
         <Dashboard
-          screen={tab as "home" | "alerts" | "news" | "family"}
+          screen={
+            tab as "home" | "alerts" | "news" | "family" | "stats" | "info"
+          }
           topInset={inset.top}
           bottomInset={inset.bottom}
           events={events}
+          areas={visibleAreas}
           nearby={nearby}
           weather={weather}
           crisis={crisis}
@@ -366,9 +371,13 @@ function AppScreen() {
           }}
           go={changeTab}
           openSource={open}
+          onRouteTo={(address) => {
+            setTo(address);
+            changeTab("route");
+          }}
         />
       )}
-      {(["map", "events", "route", "info"] as Tab[]).includes(tab) && (
+      {(["map", "events", "route"] as Tab[]).includes(tab) && (
         <View style={[s.headerWrap, { top: inset.top + 10 }]}>
           <View style={s.glass}>
             <View style={s.header}>
@@ -407,7 +416,7 @@ function AppScreen() {
           <Ionicons name="locate" color={blue} size={23} />
         </Pressable>
       )}
-      {(["map", "events", "route", "info"] as Tab[]).includes(tab) && (
+      {(["map", "events", "route"] as Tab[]).includes(tab) && (
         <Animated.View
           style={[s.panelWrap, { bottom: inset.bottom + 77, opacity: fade }]}
         >
@@ -607,55 +616,6 @@ function AppScreen() {
                       </Text>
                     </View>
                   )}
-                </ScrollView>
-              )}
-              {tab === "info" && (
-                <ScrollView style={s.scroll}>
-                  <Text style={s.kicker}>PROFIL & KÄLLOR</Text>
-                  <Text style={s.title}>Din profil i demon</Text>
-                  <Text style={s.body}>
-                    Mobilprototypen har inget eget inloggat konto ännu.
-                    Familjeprofil och delning hanteras i webbversionen.
-                  </Text>
-                  <Text style={s.section}>Datakällor</Text>
-                  <Source
-                    label="Polisnotiser"
-                    status={
-                      events ? (events.stale ? "stale" : "ok") : undefined
-                    }
-                  />
-                  <Source
-                    label={`Polisens områden ${areas?.year || ""}`}
-                    status={areas ? (areas.stale ? "stale" : "ok") : undefined}
-                  />
-                  <Source
-                    label="Granskade zoner"
-                    status={zones ? "ok" : "requires_setup"}
-                  />
-                  <Text style={s.section}>Familj och platsdelning</Text>
-                  <Text style={s.body}>
-                    Expo Go-demon använder platsen bara på begäran och när appen
-                    är öppen. Familjekonton, bakgrundsposition och pushlarm
-                    ingår inte; de kräver en separat native utvecklingsbuild och
-                    uttryckligt samtycke.
-                  </Text>
-                  <Text style={s.section}>Kartans begränsningar</Text>
-                  <Text style={s.body}>
-                    Polisnotiser är ungefärliga kommun- eller länsmarkörer.
-                    Polisens områdesbedömning uppdateras periodiskt. Ingen
-                    verifierad rikstäckande livekarta över gängrekrytering finns
-                    här.
-                  </Text>
-                  <Pressable
-                    onPress={() =>
-                      open(
-                        "https://polisen.se/om-polisen/polisens-arbete/utsatta-omraden/",
-                      )
-                    }
-                  >
-                    <Text style={s.link}>Läs Polisens områdesbedömning ↗</Text>
-                  </Pressable>
-                  <Text style={s.meta}>API: {API_BASE}</Text>
                 </ScrollView>
               )}
               {!!message && <Text style={s.warning}>{message}</Text>}

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import {
   RefreshControl,
@@ -12,10 +13,22 @@ import type {
   CrisisResponse,
   Event,
   EventsResponse,
+  Feature,
   FeedResponse,
+  FamilyMessage,
 } from "./api";
+import { familyRequest, familyToken } from "./api";
+import { FamilyScreen } from "./FamilyScreen";
+import { StatsScreen } from "./StatsScreen";
+import { ProfileScreen } from "./ProfileScreen";
 
-export type DashboardScreen = "home" | "alerts" | "news" | "family";
+export type DashboardScreen =
+  | "home"
+  | "alerts"
+  | "news"
+  | "family"
+  | "stats"
+  | "info";
 export type Destination = DashboardScreen | "map" | "events" | "route" | "info";
 
 type Props = {
@@ -23,6 +36,7 @@ type Props = {
   topInset: number;
   bottomInset: number;
   events: EventsResponse | null;
+  areas: Feature[];
   nearby: Event[];
   weather: FeedResponse | null;
   crisis: CrisisResponse | null;
@@ -35,6 +49,7 @@ type Props = {
   onLocate: () => void;
   go: (screen: Destination) => void;
   openSource: (url?: string) => void;
+  onRouteTo: (address: string) => void;
 };
 
 const navy = "#142942";
@@ -173,6 +188,7 @@ export function Dashboard(props: Props) {
     topInset,
     bottomInset,
     events,
+    areas,
     nearby,
     weather,
     crisis,
@@ -185,6 +201,7 @@ export function Dashboard(props: Props) {
     onLocate,
     go,
     openSource,
+    onRouteTo,
   } = props;
   const urgent = crisis?.vmas || [];
   const notices = crisis?.notices || [];
@@ -194,6 +211,24 @@ export function Dashboard(props: Props) {
     (a, b) => Date.parse(b.publishedAt || "") - Date.parse(a.publishedAt || ""),
   );
   const isHome = screen === "home";
+  const [lastMessage, setLastMessage] = useState<FamilyMessage | null>(null);
+  useEffect(() => {
+    if (!isHome) return;
+    let active = true;
+    familyToken()
+      .then((token) =>
+        token ? familyRequest<{ messages: FamilyMessage[] }>("messages") : null,
+      )
+      .then((result) => {
+        if (active) setLastMessage(result?.messages.at(-1) || null);
+      })
+      .catch(() => {
+        if (active) setLastMessage(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isHome]);
   return (
     <View style={styles.page}>
       <ScrollView
@@ -269,7 +304,7 @@ export function Dashboard(props: Props) {
               <ActionTile
                 icon="people-outline"
                 label="Familj"
-                detail="Platser och delning på webben"
+                detail="Karta, medlemmar & chatt"
                 tint="#E9E9FF"
                 onPress={() => go("family")}
               />
@@ -310,7 +345,11 @@ export function Dashboard(props: Props) {
               )}
             </View>
             <SectionTitle title="Chattar" />
-            <View style={styles.chatCard}>
+            <Pressable
+              style={styles.chatCard}
+              onPress={() => go("family")}
+              accessibilityRole="button"
+            >
               <View style={styles.chatIcon}>
                 <Ionicons
                   name="chatbubbles-outline"
@@ -319,13 +358,19 @@ export function Dashboard(props: Props) {
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.chatTitle}>Inga chattar i demon</Text>
+                <Text style={styles.chatTitle}>
+                  {lastMessage
+                    ? `${lastMessage.sender_name} i familjechatten`
+                    : "Familjechatten"}
+                </Text>
                 <Text style={styles.body}>
-                  Familjens platser finns på webben. Meddelanden är inte
-                  anslutna till appen ännu.
+                  {lastMessage
+                    ? lastMessage.body
+                    : "Läs och skicka meddelanden i din familj. Logga in för att se chatten."}
                 </Text>
               </View>
-            </View>
+              <Ionicons name="chevron-forward" size={16} color={blue} />
+            </Pressable>
             <SectionTitle title="Dina sidor" />
             <View style={styles.actions}>
               <ActionTile
@@ -338,18 +383,16 @@ export function Dashboard(props: Props) {
               <ActionTile
                 icon="people-outline"
                 label="Familj"
-                detail="Hantera på webben"
+                detail="Medlemmar & zoner"
                 tint="#E9E9FF"
                 onPress={() => go("family")}
               />
               <ActionTile
                 icon="stats-chart-outline"
                 label="Statistik"
-                detail="BRÅ och trygghetsdata"
+                detail="BRÅ och polisnotiser"
                 tint="#E2F3F0"
-                onPress={() =>
-                  openSource("https://tryggpuls.onrender.com/#bra")
-                }
+                onPress={() => go("stats")}
               />
             </View>
             <Text style={styles.finePrint}>
@@ -470,43 +513,23 @@ export function Dashboard(props: Props) {
               </>
             )}
             {screen === "family" && (
+              <FamilyScreen
+                nearby={events?.events || []}
+                openSource={openSource}
+              />
+            )}
+            {screen === "stats" && (
+              <StatsScreen nearby={nearby} areas={areas} />
+            )}
+            {screen === "info" && (
               <>
-                <Text style={styles.eyebrow}>FAMILJ & PLATSER</Text>
-                <Text style={styles.heading}>Håll ihop, på era villkor.</Text>
-                <Text style={styles.intro}>
-                  Familjemedlemmar väljer själva om de vill dela sin plats och
-                  vilka varningar de vill ha.
+                <ProfileScreen onRouteTo={onRouteTo} />
+                <SectionTitle title="Datakällor" />
+                <Text style={styles.body}>
+                  Polisnotiser, BRÅ, SMHI och Krisinformation hämtas från
+                  TryggPuls server. Publicerade uppgifter kan vara fördröjda och
+                  kartpunkter ungefärliga.
                 </Text>
-                <View style={styles.familyHero}>
-                  <Ionicons name="people" size={34} color="#6763B9" />
-                  <Text style={styles.familyTitle}>Min familj</Text>
-                  <Text style={styles.body}>
-                    Hantera familjekonto, inbjudningar och egna zoner i
-                    TryggPuls webbversion.
-                  </Text>
-                  <Pressable
-                    style={styles.familyButton}
-                    onPress={() =>
-                      openSource("https://tryggpuls.onrender.com/#familj")
-                    }
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.familyButtonText}>
-                      Öppna familj på webben ↗
-                    </Text>
-                  </Pressable>
-                </View>
-                <View style={styles.familyNote}>
-                  <Ionicons
-                    name="information-circle-outline"
-                    size={20}
-                    color={blue}
-                  />
-                  <Text style={styles.body}>
-                    Den här Expo Go-demon delar inte plats i bakgrunden och
-                    skickar inga familjelarm när appen är stängd.
-                  </Text>
-                </View>
               </>
             )}
           </>

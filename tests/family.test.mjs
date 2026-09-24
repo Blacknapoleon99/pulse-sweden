@@ -53,6 +53,26 @@ test('push subscriptions reject arbitrary network destinations', async () => {
   await pool.end();
 });
 
+test('native bearer sessions and family chat stay inside the family', async () => {
+  const pool = new (newDb().adapters.createPg().Pool)();
+  const service = createFamilyService({ pool });
+  await service.init();
+  const first = await service.register({ email: 'first@example.test', name: 'Första', password: 'first-long-password-123' });
+  const other = await service.register({ email: 'other@example.test', name: 'Andra', password: 'other-long-password-123' });
+  await service.createGroup(first.user, 'Första familjen');
+  await service.createGroup(other.user, 'Andra familjen');
+  const firstUser = await service.session({ headers: { authorization: `Bearer ${first.token}` } });
+  const otherUser = await service.session({ headers: { authorization: `Bearer ${other.token}` } });
+  assert.equal(firstUser.id, first.user.id);
+  await service.sendMessage(firstUser, 'Hej familjen');
+  assert.equal((await service.listMessages(firstUser))[0].body, 'Hej familjen');
+  assert.equal((await service.listMessages(otherUser)).length, 0);
+  await assert.rejects(service.sendMessage(firstUser, 'x'.repeat(501)), { status: 400 });
+  await service.logout({ headers: { authorization: `Bearer ${first.token}` } });
+  assert.equal(await service.session({ headers: { authorization: `Bearer ${first.token}` } }), null);
+  await pool.end();
+});
+
 test('frivilliga polisområdesvarningar kräver inträde efter första GPS-positionen', async () => {
   const pool = new (newDb().adapters.createPg().Pool)();
   const areasReader = async () => ({ year: 2025, stale: false, sourceUrl: 'https://polisen.se/om-polisen/polisens-arbete/utsatta-omraden/', features: [
