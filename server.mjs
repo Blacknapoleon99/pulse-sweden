@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createRouteCache } from './route-cache.mjs';
 import { feeds, readCrisis, createRequestQueue } from './feeds.mjs';
 import { createFamilyApi } from './family-api.mjs';
 import { readPoliceAreas, policeAreasStatus, sourcePage as policeAreasSource } from './police-areas.mjs';
@@ -40,6 +41,7 @@ if (!process.env.DATABASE_URL && process.env.NODE_ENV !== 'production') {
 const familyApi = createFamilyApi(localFamilyPool ? { pool: localFamilyPool } : {});
 const publicZoneApi = createPublicZoneService(localFamilyPool ? { pool: localFamilyPool } : {});
 const fireRiskService = createFireRiskService();
+const routeCache = createRouteCache();
 export const familyService = familyApi.service;
 let familyDbReady = false;
 let publicZoneDbReady = false;
@@ -597,7 +599,23 @@ async function calculateSafeRoute(fromLat, fromLon, toLat, toLon, mode = 'walkin
   const primaryRoute = data.routes[0];
   const coordinates = primaryRoute.geometry?.coordinates || [];
   if (coordinates.length < 2 || !Number.isFinite(primaryRoute.distance) || !Number.isFinite(primaryRoute.duration)) throw new UpstreamError('Ofullständig rutt från källan');
+  const cachedRoute = {
+    primaryRoute: { geometry: primaryRoute.geometry, distance: primaryRoute.distance, duration: primaryRoute.duration },
+    mode,
+    bufferMeters
+  };
+  const routeId = routeCache.put(cachedRoute);
+  return analyzeRoute(cachedRoute.primaryRoute, mode, bufferMeters, routeId);
+}
 
+async function refreshCachedRoute(routeId) {
+  const cachedRoute = routeCache.get(routeId);
+  if (!cachedRoute) return null;
+  return analyzeRoute(cachedRoute.primaryRoute, cachedRoute.mode, cachedRoute.bufferMeters, routeId);
+}
+
+async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
+  const coordinates = primaryRoute.geometry?.coordinates || [];
   // Polisnotiser anger kommun/län. Punkten får användas som grov geografisk
   // relevans, aldrig för att visa ett exakt avstånd till brott.
   const eventsResult = await fetchEvents();
@@ -708,6 +726,7 @@ async function calculateSafeRoute(fromLat, fromLon, toLat, toLon, mode = 'walkin
 
   return {
     ok: true,
+    routeId,
     distanceMeters: Math.round(primaryRoute.distance),
     distanceKm: (primaryRoute.distance / 1000).toFixed(2),
     durationSeconds: Math.round(primaryRoute.duration),
@@ -894,6 +913,21 @@ export const server = http.createServer(async (req, res) => {
           return json(req, res, err.status, { error: err.message });
         }
         return json(req, res, 502, { error: 'Kunde inte slå upp adress' });
+      }
+    }
+
+    if (url.pathname === '/api/route-refresh') {
+      const routeId = url.searchParams.get('routeId') || '';
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(routeId)) {
+        return json(req, res, 400, { error: 'Ogiltigt rutt-id', code: 'INVALID_ROUTE_ID' });
+      }
+      try {
+        const routeResult = await refreshCachedRoute(routeId);
+        if (!routeResult) return json(req, res, 404, { error: 'Den sparade rutten finns inte längre. Beräkna rutten igen.', code: 'ROUTE_CACHE_MISS' });
+        return json(req, res, 200, routeResult);
+      } catch (err) {
+        if (err instanceof UpstreamError) return json(req, res, err.status, { error: err.message });
+        return json(req, res, 500, { error: err.message || 'Kunde inte uppdatera ruttanalysen' });
       }
     }
 

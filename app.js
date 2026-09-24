@@ -481,6 +481,7 @@ async function calculateRoute({ refresh = false } = {}) {
   if (!refresh) invalidateRoute();
   const revision = routeRevision;
   const calcBtn = $('#btn-calculate-route');
+  if (refresh && calcBtn.disabled) return;
   calcBtn.disabled = true;
   calcBtn.textContent = refresh ? 'Uppdaterar källor…' : 'Beräknar rutt…';
 
@@ -488,7 +489,9 @@ async function calculateRoute({ refresh = false } = {}) {
   const buffer = $('#route-buffer').value;
 
   try {
-    const url = `/api/route?fromLat=${state.routeFrom.lat}&fromLon=${state.routeFrom.lon}&toLat=${state.routeTo.lat}&toLon=${state.routeTo.lon}&mode=${mode}&buffer=${buffer}`;
+    const url = refresh && state.currentRouteData?.routeId
+      ? `/api/route-refresh?routeId=${encodeURIComponent(state.currentRouteData.routeId)}`
+      : `/api/route?fromLat=${state.routeFrom.lat}&fromLon=${state.routeFrom.lon}&toLat=${state.routeTo.lat}&toLon=${state.routeTo.lon}&mode=${mode}&buffer=${buffer}`;
     const res = await fetch(url);
     const data = await res.json();
 
@@ -513,8 +516,10 @@ async function calculateRoute({ refresh = false } = {}) {
       } else showToast(`Fel vid ruttberäkning: ${err.message}`);
     }
   } finally {
-    calcBtn.disabled = false;
-    calcBtn.textContent = 'Beräkna rutt';
+    if (revision === routeRevision) {
+      calcBtn.disabled = false;
+      calcBtn.textContent = 'Beräkna rutt';
+    }
   }
 }
 
