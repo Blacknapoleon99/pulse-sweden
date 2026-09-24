@@ -1727,6 +1727,21 @@ function init() {
     localStorage.setItem('tryggpuls_theme', next);
     $('#btn-theme-toggle').textContent = next === 'dark' ? 'Byt till ljust tema' : 'Byt till mörkt tema';
   });
+  const savedSurface = localStorage.getItem('tryggpuls_surface') === 'glass' ? 'glass' : 'standard';
+  document.body.dataset.surface = savedSurface;
+  const glassToggle = $('#btn-glass-toggle');
+  const syncGlassToggle = () => {
+    const enabled = document.body.dataset.surface === 'glass';
+    glassToggle.textContent = enabled ? 'Stäng glasdesign' : 'Prova glasdesign';
+    glassToggle.setAttribute('aria-pressed', String(enabled));
+  };
+  syncGlassToggle();
+  glassToggle.addEventListener('click', () => {
+    const next = document.body.dataset.surface === 'glass' ? 'standard' : 'glass';
+    document.body.dataset.surface = next;
+    localStorage.setItem('tryggpuls_surface', next);
+    syncGlassToggle();
+  });
   for (const dialog of ['more-dialog', 'sources-dialog', 'legal-dialog']) document.getElementById(dialog).addEventListener('click', event => { if (event.target === event.currentTarget) event.currentTarget.close(); });
 
   // Initiera underfunktioner

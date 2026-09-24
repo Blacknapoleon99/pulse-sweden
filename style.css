@@ -2283,6 +2283,237 @@ body[data-theme="dark"] .source-warning { color: #ffdf9a !important; background:
   .admin-page { padding: 14px; }
   .admin-grid { grid-template-columns: 1fr; }
 }
+
+/* Optional glass surface: cool translucent layers, soft depth and restrained motion. */
+body[data-surface="glass"] {
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --bg-primary: #eaf0f6;
+  --bg-sidebar: rgba(249, 252, 255, .76);
+  --bg-card: rgba(255, 255, 255, .78);
+  --bg-card-hover: rgba(255, 255, 255, .92);
+  --bg-input: rgba(255, 255, 255, .88);
+  --border-color: rgba(107, 132, 157, .22);
+  --border-subtle: rgba(107, 132, 157, .14);
+  --border-highlight: rgba(94, 124, 153, .34);
+  --text-main: #1e3043;
+  --text-muted: #52687d;
+  --text-dim: #657c91;
+  --accent-emerald: #187a68;
+  background-color: var(--bg-primary);
+  background-image:
+    radial-gradient(ellipse at 12% 8%, rgba(186, 229, 219, .55), transparent 38%),
+    radial-gradient(ellipse at 87% 18%, rgba(196, 218, 246, .62), transparent 42%),
+    linear-gradient(145deg, #eef4f8, #e8eff5 58%, #edf2f6);
+  background-attachment: fixed;
+}
+body[data-surface="glass"] > header {
+  background: rgba(250, 253, 255, .74);
+  border-color: rgba(255, 255, 255, .82);
+  box-shadow: 0 8px 28px rgba(37, 62, 86, .09), inset 0 -1px rgba(89, 119, 149, .12);
+  transition: background-color .3s ease, border-color .3s ease, box-shadow .3s ease;
+  -webkit-backdrop-filter: saturate(180%) blur(22px);
+  backdrop-filter: saturate(180%) blur(22px);
+}
+body[data-surface="glass"] .brand-title,
+body[data-surface="glass"] .brand-title strong,
+body[data-surface="glass"] .brand-subtitle { color: #21384b; font-family: var(--font-display); letter-spacing: 0; text-transform: none; }
+body[data-surface="glass"] .brand-title { font-family: var(--font-display); letter-spacing: -.02em; }
+body[data-surface="glass"] .brand-title strong { color: #187a68; }
+body[data-surface="glass"] .main-nav {
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: 18px;
+  background: rgba(226, 235, 243, .52);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .72), 0 3px 12px rgba(38, 62, 85, .05);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  transition: background-color .3s ease, border-color .3s ease, box-shadow .3s ease;
+}
+body[data-surface="glass"] .nav-tab {
+  border-radius: 14px;
+  transition: transform .22s cubic-bezier(.2, .8, .2, 1), background-color .22s ease, border-color .22s ease, color .22s ease, box-shadow .22s ease;
+}
+body[data-surface="glass"] .nav-tab:hover { background: rgba(255, 255, 255, .48); }
+body[data-surface="glass"] .nav-tab.active {
+  color: #17614f;
+  background: rgba(255, 255, 255, .84);
+  border: 1px solid rgba(255, 255, 255, .96);
+  box-shadow: 0 3px 10px rgba(45, 71, 94, .10), inset 0 1px rgba(255, 255, 255, .95);
+}
+body[data-surface="glass"] main,
+body[data-surface="glass"] #sidebar,
+body[data-surface="glass"] .tab-panel { background: transparent; }
+body[data-surface="glass"] #sidebar {
+  border-color: rgba(255, 255, 255, .64);
+  transition: background-color .3s ease, border-color .3s ease;
+  -webkit-backdrop-filter: saturate(145%) blur(18px);
+  backdrop-filter: saturate(145%) blur(18px);
+}
+body[data-surface="glass"] .tab-panel section,
+body[data-surface="glass"] .nearby-search-card,
+body[data-surface="glass"] .route-result-card,
+body[data-surface="glass"] .information-card,
+body[data-surface="glass"] .source-card,
+body[data-surface="glass"] .legal-card,
+body[data-surface="glass"] .crisis-panel,
+body[data-surface="glass"] .incident-card,
+body[data-surface="glass"] .route-incident-item,
+body[data-surface="glass"] .route-zone-item,
+body[data-surface="glass"] .nearby-card,
+body[data-surface="glass"] .official-areas,
+body[data-surface="glass"] .family-app section,
+body[data-surface="glass"] .family-consent,
+body[data-surface="glass"] .family-form,
+body[data-surface="glass"] .family-personal-zones,
+body[data-surface="glass"] .zone-creator-card,
+body[data-surface="glass"] .kids-safe-mode,
+body[data-surface="glass"] .gps-share-card,
+body[data-surface="glass"] .bra-summary-card,
+body[data-surface="glass"] .corp-contacts {
+  background-color: rgba(255, 255, 255, .68);
+  border-color: rgba(255, 255, 255, .9);
+  box-shadow: 0 8px 28px rgba(48, 72, 95, .08), inset 0 1px rgba(255, 255, 255, .9);
+  transition: background-color .3s ease, border-color .3s ease, box-shadow .3s ease;
+  -webkit-backdrop-filter: saturate(150%) blur(16px);
+  backdrop-filter: saturate(150%) blur(16px);
+}
+body[data-surface="glass"] .nearby-overview section,
+body[data-surface="glass"] .route-detail-section,
+body[data-surface="glass"] .route-zone-item,
+body[data-surface="glass"] .nearby-card,
+body[data-surface="glass"] .route-incident-item { background-color: rgba(255, 255, 255, .66); }
+body[data-surface="glass"] input,
+body[data-surface="glass"] select,
+body[data-surface="glass"] textarea {
+  background: rgba(255, 255, 255, .76);
+  border-color: rgba(105, 133, 160, .26);
+  border-radius: 13px;
+}
+body[data-surface="glass"] .btn-primary,
+body[data-surface="glass"] .btn-secondary,
+body[data-surface="glass"] .btn-subtle,
+body[data-surface="glass"] .btn-map-control,
+body[data-surface="glass"] .chip,
+body[data-surface="glass"] .welcome-actions button,
+body[data-surface="glass"] .info-shortcut,
+body[data-surface="glass"] .btn-chip-demo,
+body[data-surface="glass"] .place-search,
+body[data-surface="glass"] .more-links button,
+body[data-surface="glass"] .more-links a {
+  border-radius: 14px;
+  transition: transform .24s cubic-bezier(.2, .8, .2, 1), background-color .22s ease, border-color .22s ease, box-shadow .22s ease;
+}
+body[data-surface="glass"] .btn-secondary,
+body[data-surface="glass"] .btn-subtle,
+body[data-surface="glass"] .btn-map-control,
+body[data-surface="glass"] .btn-chip-demo,
+body[data-surface="glass"] .place-search,
+body[data-surface="glass"] .more-links button,
+body[data-surface="glass"] .more-links a {
+  background: rgba(255, 255, 255, .68);
+  border-color: rgba(255, 255, 255, .88);
+  box-shadow: 0 3px 12px rgba(42, 65, 88, .07), inset 0 1px rgba(255, 255, 255, .9);
+}
+body[data-surface="glass"] .btn-primary {
+  background: linear-gradient(180deg, #238b75, #16715f);
+  border-color: rgba(20, 103, 85, .65);
+  box-shadow: 0 5px 14px rgba(21, 111, 92, .22), inset 0 1px rgba(255, 255, 255, .28);
+}
+body[data-surface="glass"] .btn-secondary:hover,
+body[data-surface="glass"] .btn-subtle:hover,
+body[data-surface="glass"] .btn-map-control:hover,
+body[data-surface="glass"] .btn-chip-demo:hover,
+body[data-surface="glass"] .place-search:hover,
+body[data-surface="glass"] .more-links button:hover,
+body[data-surface="glass"] .more-links a:hover { transform: translateY(-1px); box-shadow: 0 7px 17px rgba(42, 65, 88, .11); }
+body[data-surface="glass"] .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(21, 111, 92, .26); }
+body[data-surface="glass"] button:active { transform: scale(.975); }
+body[data-surface="glass"] .map-top-bar .status-pill,
+body[data-surface="glass"] .map-floating-title,
+body[data-surface="glass"] .map-legend,
+body[data-surface="glass"] .map-layer-options {
+  color: #20364a;
+  background: rgba(250, 253, 255, .76);
+  border-color: rgba(255, 255, 255, .94);
+  box-shadow: 0 8px 24px rgba(37, 61, 84, .14), inset 0 1px rgba(255, 255, 255, .96);
+  -webkit-backdrop-filter: saturate(160%) blur(18px);
+  backdrop-filter: saturate(160%) blur(18px);
+}
+body[data-surface="glass"] .map-floating-title h2,
+body[data-surface="glass"] .map-floating-title .eyebrow { color: #20364a; }
+body[data-surface="glass"] #sources-dialog,
+body[data-surface="glass"] #legal-dialog,
+body[data-surface="glass"] #more-dialog {
+  background: rgba(249, 252, 255, .88);
+  border-color: rgba(255, 255, 255, .96);
+  box-shadow: 0 22px 70px rgba(30, 51, 72, .22), inset 0 1px rgba(255, 255, 255, .96);
+  -webkit-backdrop-filter: saturate(160%) blur(26px);
+  backdrop-filter: saturate(160%) blur(26px);
+}
+body[data-surface="glass"] .more-links button:hover,
+body[data-surface="glass"] .more-links a:hover { background: rgba(255, 255, 255, .96); }
+body[data-surface="glass"] .tab-panel.active { animation: glass-panel-enter .28s cubic-bezier(.2, .75, .25, 1) both; }
+@keyframes glass-panel-enter {
+  from { opacity: .65; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+body[data-theme="dark"][data-surface="glass"] {
+  --bg-primary: #111a23;
+  --bg-sidebar: rgba(24, 36, 48, .76);
+  --bg-card: rgba(35, 50, 64, .78);
+  --bg-card-hover: rgba(43, 61, 77, .92);
+  --bg-input: rgba(26, 40, 54, .86);
+  --border-color: rgba(175, 199, 220, .16);
+  --border-subtle: rgba(175, 199, 220, .10);
+  --border-highlight: rgba(175, 199, 220, .25);
+  --text-main: #edf4fa;
+  --text-muted: #c0d0df;
+  --text-dim: #a1b5c8;
+  background-image: radial-gradient(ellipse at 12% 8%, rgba(30, 91, 91, .38), transparent 38%), radial-gradient(ellipse at 87% 18%, rgba(47, 78, 118, .42), transparent 42%), linear-gradient(145deg, #131d28, #17212d 58%, #111923);
+}
+body[data-theme="dark"][data-surface="glass"] > header { background: rgba(21, 32, 43, .76); border-color: rgba(175, 199, 220, .12); }
+body[data-theme="dark"][data-surface="glass"] .main-nav { background: rgba(38, 53, 67, .54); border-color: rgba(255, 255, 255, .12); }
+body[data-theme="dark"][data-surface="glass"] .nav-tab.active { color: #d5f1e7; background: rgba(89, 127, 111, .34); border-color: rgba(202, 232, 219, .22); }
+body[data-theme="dark"][data-surface="glass"] #sidebar { background: transparent; border-color: rgba(175, 199, 220, .12); }
+body[data-theme="dark"][data-surface="glass"] .tab-panel section,
+body[data-theme="dark"][data-surface="glass"] .nearby-search-card,
+body[data-theme="dark"][data-surface="glass"] .route-result-card,
+body[data-theme="dark"][data-surface="glass"] .information-card,
+body[data-theme="dark"][data-surface="glass"] .source-card,
+body[data-theme="dark"][data-surface="glass"] .legal-card,
+body[data-theme="dark"][data-surface="glass"] .crisis-panel,
+body[data-theme="dark"][data-surface="glass"] .incident-card,
+body[data-theme="dark"][data-surface="glass"] .route-incident-item,
+body[data-theme="dark"][data-surface="glass"] .route-zone-item,
+body[data-theme="dark"][data-surface="glass"] .nearby-card,
+body[data-theme="dark"][data-surface="glass"] .official-areas,
+body[data-theme="dark"][data-surface="glass"] .family-app section,
+body[data-theme="dark"][data-surface="glass"] .family-consent,
+body[data-theme="dark"][data-surface="glass"] .family-form,
+body[data-theme="dark"][data-surface="glass"] .family-personal-zones,
+body[data-theme="dark"][data-surface="glass"] .zone-creator-card,
+body[data-theme="dark"][data-surface="glass"] .kids-safe-mode,
+body[data-theme="dark"][data-surface="glass"] .gps-share-card,
+body[data-theme="dark"][data-surface="glass"] .bra-summary-card,
+body[data-theme="dark"][data-surface="glass"] .corp-contacts { background-color: rgba(35, 50, 64, .70); border-color: rgba(220, 235, 248, .15); }
+body[data-theme="dark"][data-surface="glass"] .btn-secondary,
+body[data-theme="dark"][data-surface="glass"] .btn-subtle,
+body[data-theme="dark"][data-surface="glass"] .btn-map-control,
+body[data-theme="dark"][data-surface="glass"] .btn-chip-demo,
+body[data-theme="dark"][data-surface="glass"] .place-search,
+body[data-theme="dark"][data-surface="glass"] .more-links button,
+body[data-theme="dark"][data-surface="glass"] .more-links a { color: var(--text-main); background: rgba(42, 59, 74, .72); border-color: rgba(220, 235, 248, .16); }
+body[data-theme="dark"][data-surface="glass"] .map-top-bar .status-pill,
+body[data-theme="dark"][data-surface="glass"] .map-floating-title,
+body[data-theme="dark"][data-surface="glass"] .map-legend,
+body[data-theme="dark"][data-surface="glass"] .map-layer-options { color: var(--text-main); background: rgba(24, 37, 50, .82); border-color: rgba(220, 235, 248, .16); }
+body[data-theme="dark"][data-surface="glass"] #sources-dialog,
+body[data-theme="dark"][data-surface="glass"] #legal-dialog,
+body[data-theme="dark"][data-surface="glass"] #more-dialog { color: var(--text-main); background: rgba(24, 37, 50, .92); border-color: rgba(220, 235, 248, .18); }
+@media (prefers-reduced-motion: reduce) {
+  body[data-surface="glass"] *, body[data-surface="glass"] *::before, body[data-surface="glass"] *::after { animation: none !important; transition: none !important; }
+}
 @media (max-width: 640px) {
   .brand-title { font-size: 16px; }
   .emergency-link { min-height: 44px; padding: 8px 12px; }
