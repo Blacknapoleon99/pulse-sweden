@@ -10,7 +10,7 @@ async function familyRequest(path, method = 'GET', value = {}) {
   return data;
 }
 const inviteFromHash = () => location.hash.startsWith('#familj-invite=') ? location.hash.slice('#familj-invite='.length) : null;
-const safeText = value => esc(value);
+const safeText = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 async function familyRefresh() {
   try {
