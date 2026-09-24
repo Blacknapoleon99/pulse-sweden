@@ -19,6 +19,8 @@ test('HTTP routing, input validation, health, HEAD and private files', async () 
     assert.equal(css.status, 200);
     assert.match(await css.text(), /\.leaflet-tile/);
     assert.equal((await fetch(base + '/family-client.js')).status, 200);
+    assert.equal((await fetch(base + '/route-follow.js')).status, 200);
+    assert.match(await (await fetch(base + '/route-follow.js')).text(), /createRouteFollowController/);
     assert.equal((await fetch(base + '/family-sw.js')).status, 200);
     const manifest = await fetch(base + '/manifest.webmanifest');
     assert.equal(manifest.status, 200);

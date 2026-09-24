@@ -12,13 +12,13 @@ Publika informationsendpoints stöder GET och HEAD. Informationsflöden anger `f
 | Endpoint | Innehåll / parametrar |
 | --- | --- |
 | `/api/events` | Polisens publicerade händelser, cache 65 sekunder |
-| `/api/police-areas` | Polisens officiella områdesgränser i WGS84; söker ny lägesbild högst en gång per dygn när tjänsten används och markerar reservdata med `stale` |
+| `/api/police-areas` | Polisens officiella områdesgränser i WGS84; svarar med bedömningsår och källänk. Den årsvisa publiceringen är inte ett realtidsflöde |
 | `/api/security-zone-news` | Nyligen publicerade polisartiklar om säkerhetszoner från Polisens nyhets- och press-RSS, cache 30 minuter; artiklar innebär inte automatiskt en aktiv zon |
-| `/api/crisis-updates` | VMA och notiser från Krisinformation v3, cache 65 sekunder |
+| `/api/crisis-updates` | VMA och notiser från Krisinformation v3, cache 65 sekunder; svaren bevarar geometri, berörda områden och separat status för VMA/notiser |
 | `/api/weather-warnings` | SMHI:s varningar och meddelanden med nivå, område, giltighet och råd; cache 65 sekunder |
 | `/api/fire-risk?lat=...&lon=...` | SMHI:s timvisa punktprognos för skogsbrandsrisk, upp till 48 timmar; cache 20 minuter |
 | `/api/traffic` | Trafikverkets publicerade väg- och järnvägsstörningar; kräver `TRAFIKVERKET_API_KEY`, som bara används på servern |
-| `/api/police-stations` och `/api/police-stations/{id}` | Polisens stationsregister och stationsuppgifter, inklusive öppettider/tjänster där källan lämnar dem |
+| `/api/police-stations` och `/api/police-stations/{id}` | Polisens stationsregister och stationsuppgifter, inklusive öppettider/tjänster där källan lämnar dem; stationssvar anger källa, hämtningstid och eventuell reservdata |
 | `/api/shelters?lat=...&lon=...&radius=...` | Registrerade skyddsrum nära vald plats; registret visar inte om de är öppna eller tillgängliga just nu |
 | `/api/crisis-news` | Krisinformation, senaste veckans nyheter; cache 5 minuter |
 | `/api/preparedness` | Krisinformations beredskapsguider; cache 1 timme |
@@ -26,9 +26,9 @@ Publika informationsendpoints stöder GET och HEAD. Informationsflöden anger `f
 | `/api/legal-updates` | Domstolsverkets rättspraxis, cache 65 sekunder |
 | `/api/geocode?q=...` | Svensk platssökning, 2–200 tecken, explicit sökning |
 | `/api/reverse-geocode?lat=...&lon=...` | Koordinater till adress |
-| `/api/route?fromLat=...&fromLon=...&toLat=...&toLon=...&mode=walking&buffer=600` | Gång- eller bilrutt, polisnotiser från senaste 24 timmarna, officiella zonpassager, trafik/vädervarningar samt SMHI-brandrisk vid provpunkter längs rutten; korridor 300–1 000 m |
+| `/api/route?fromLat=...&fromLon=...&toLat=...&toLon=...&mode=walking&buffer=600` | Gång- eller bilrutt, polisnotiser från senaste 24 timmarna, officiella zonpassager, Trafikverkets störningar, geografiskt matchade SMHI/Krisinformation-varningar samt SMHI-brandrisk vid provpunkter; korridor 300–1 000 m. `sourceStatus` visar varje källas status och senaste hämtning |
 | `/api/route-refresh?routeId=...` | Hämtar aktuell källinformation för den redan beräknade rutten utan att skapa en ny vägsträckning |
-| `/api/public-zones` | Aktiva, manuellt granskade myndighetszoner med källutdrag, källa och giltighetsperiod; publikt endast efter granskning och publicering |
+| `/api/public-zones` | Aktiva, manuellt granskade myndighetszoner med ordagrant källutdrag, källa, beslutstid och giltighetsperiod; publikt endast efter granskning och publicering |
 | `/api/admin/zones` | Token-skyddad hantering av utkast, granskning och publicering av myndighetszoner |
 | `/api/map-config` | Vald kartleverantör, utan API-nyckel |
 | `/api/map-tiles/{z}/{x}/{y}.png` | CARTO Voyager via servern, zoom 0–19; kräver konfigurerad nyckel |
@@ -66,7 +66,7 @@ För tillförlitlig bakgrundskontroll på Render krävs en tjänst som inte somn
 
 ### Verifiering
 
-`npm run check` kontrollerar syntax. `npm test` kör deterministiska tester för riktig serverkod, HTTP-validering, skydd av privata filer, cache, källfel, partiella krisflöden, geometri och datum. Testerna startar en egen server på en ledig port och behöver inga externa tjänster.
+`npm run check` kontrollerar syntax. `npm test` kör deterministiska tester för riktig serverkod, HTTP-validering, skydd av privata filer, cache, källfel, partiella krisflöden, polygoner med hål och smala gränser, ungefärliga polispositioner, stationsreservdata och GPS-bevakningens start/paus/stop. Testerna startar en egen server på en ledig port och behöver inga externa tjänster.
 
 Livekontroll 2026-09-24: SMHI:s brandriskprognos-API svarade med timvisa gridvärden. Rutten visar punktprognoser med ungefärlig gridupplösning, inte riskpolygoner; detta är skilt från brandhändelser och eldningsförbud. Övriga källors senaste kontrollerade svar redovisas i `/api/sources`; externa tjänster kan ändra tillgänglighet efter kontrollen.
 

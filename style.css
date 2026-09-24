@@ -2169,6 +2169,8 @@ main { background: var(--bg-primary); }
 .btn-secondary:hover, .btn-subtle:hover, .btn-map-control:hover, .btn-chip-demo:hover, .place-search:hover { background: #f2f7f3; border-color: #79a98a; color: #174e38; }
 .btn-danger { min-height: 44px; padding: 10px 14px; color: #9a2631; background: #fff1f1; border: 1px solid #e7b8bb; border-radius: 12px; font-weight: 700; }
 .btn-danger:hover { background: #ffe4e5; }
+.btn-icon, .btn-emergency-main, .btn-emergency-secondary, .btn-child-sos { min-height: 44px; }
+.admin-back { min-height: 44px; display: inline-flex; align-items: center; }
 button:disabled { opacity: .58; }
 input, select, textarea { color: var(--text-main); background: #fff; border: 1px solid var(--border-highlight); border-radius: 10px; }
 input::placeholder, textarea::placeholder { color: #778b7f; opacity: 1; }
@@ -2283,7 +2285,7 @@ body[data-theme="dark"] .source-warning { color: #ffdf9a !important; background:
 }
 @media (max-width: 640px) {
   .brand-title { font-size: 16px; }
-  .emergency-link { min-height: 40px; padding: 8px 12px; }
+  .emergency-link { min-height: 44px; padding: 8px 12px; }
   .tab-panel { padding: 16px; }
   .route-actions { grid-template-columns: 1fr; }
   .route-actions .btn-primary { grid-column: auto; }

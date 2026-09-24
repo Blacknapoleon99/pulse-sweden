@@ -2,7 +2,7 @@
 export function createFeed({ url, normalize, ttl = 65_000, fetcher = fetch, now = Date.now }) {
   let cache = null, error = null, lastAttempt = null, pending = null;
   const snapshot = () => ({
-    items: cache?.items || [], fetchedAt: cache?.fetchedAt || null,
+    items: cache?.items || [], source: url, fetchedAt: cache?.fetchedAt || null,
     stale: Boolean(error), error,
     status: error ? (cache ? 'stale' : 'unavailable') : cache ? 'ok' : 'not_checked',
     nextCheckAt: lastAttempt === null ? null : new Date(lastAttempt + ttl).toISOString()
@@ -39,14 +39,26 @@ export function sourceLink(value, fallback) {
 }
 
 export function normalizeCrisis(items, type) {
-  return items.filter(item => item && item.Headline).map(item => ({
-    id: String(item.Id ?? item.ContentId), type,
-    title: String(item.Headline), summary: String(item.Preamble || item.BodyText || ''),
-    publishedAt: item.ChangedDate || item.Published || null,
-    area: Array.isArray(item.Area) ? item.Area.map(a => a.Description || a.Name || a.sv || '').filter(Boolean).join(', ') : '',
-    areas: Array.isArray(item.Area) ? item.Area.map(a => ({ name: a.Description || a.Name || a.sv || '', code: a.Code || a.code || null, geometry: a.area?.geometry || a.Geometry || a.geometry || null })).filter(a => a.name || a.geometry) : [],
-    source: sourceLink(item.Web, 'https://www.krisinformation.se/')
-  }));
+  return items.filter(item => item && item.Headline).map(item => {
+    const areas = Array.isArray(item.Area) ? item.Area.map(area => {
+      const rawGeometry = area.area?.geometry || area.Geometry || area.geometry || null;
+      const geometry = rawGeometry?.type === 'Feature' ? rawGeometry.geometry : rawGeometry;
+      return {
+        name: String(area.Description || area.Name || area.sv || '').trim(),
+        code: area.Code || area.code || null,
+        geometry
+      };
+    }).filter(area => area.name || area.geometry) : [];
+    return {
+      id: String(item.Id ?? item.ContentId ?? item.IdWithPrefix ?? item.Headline), type,
+      title: String(item.Headline), summary: String(item.Preamble || item.BodyText || ''),
+      publishedAt: item.ChangedDate || item.Published || null,
+      area: areas.map(area => area.name).filter(Boolean).join(', '),
+      areas,
+      geometry: areas.length === 1 ? areas[0].geometry : null,
+      source: sourceLink(item.Web, 'https://www.krisinformation.se/')
+    };
+  });
 }
 
 export function normalizeWarnings(items) {
@@ -74,9 +86,12 @@ export const feeds = {
 export async function readCrisis(sources = feeds) {
   const [vmas, notices] = await Promise.all([sources.vmas.read(), sources.notices.read()]);
   const errors = [vmas.error && `VMA: ${vmas.error}`, notices.error && `Notiser: ${notices.error}`].filter(Boolean);
+  const fetchedAt = [vmas.fetchedAt, notices.fetchedAt].filter(Boolean).sort()[0] || null;
   return { vmas: vmas.items, notices: notices.items,
-    fetchedAt: [vmas.fetchedAt, notices.fetchedAt].filter(Boolean).sort()[0] || null,
+    source: 'https://api.krisinformation.se/v3',
+    fetchedAt,
     stale: errors.length > 0, partialError: errors.join('; ') || null, error: errors.join('; ') || null,
+    status: errors.length ? fetchedAt ? 'stale' : 'unavailable' : fetchedAt ? 'ok' : 'not_checked',
     sources: { vmas, notices } };
 }
 

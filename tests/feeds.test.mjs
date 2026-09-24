@@ -5,10 +5,11 @@ import { createFeed, createRequestQueue, normalizeWarnings, normalizeCrisis, rea
 test('crisis failures retain source-specific cached VMA and never claim a successful empty feed', async () => {
   const unavailable = { items: [], fetchedAt: null, stale: true, error: 'offline' };
   const firstFailure = await readCrisis({ vmas: { read: async () => unavailable }, notices: { read: async () => unavailable } });
-  assert.equal(firstFailure.fetchedAt, null); assert.equal(firstFailure.stale, true);
+  assert.equal(firstFailure.fetchedAt, null); assert.equal(firstFailure.stale, true); assert.equal(firstFailure.status, 'unavailable');
   const cached = { items: [{ id: 'vma', title: 'Brand' }], fetchedAt: '2026-09-22T12:00:00Z', stale: true, error: 'offline' };
   const partial = await readCrisis({ vmas: { read: async () => cached }, notices: { read: async () => ({ items: [], fetchedAt: '2026-09-23T12:00:00Z', stale: false }) } });
   assert.equal(partial.vmas.length, 1); assert.equal(partial.fetchedAt, cached.fetchedAt); assert.equal(partial.stale, true);
+  assert.equal(partial.status, 'stale');
 });
 
 test('feed coalesces requests, keeps last good data after failure, then recovers', async () => {
@@ -37,20 +38,27 @@ test('first failure is unavailable; successful empty response is valid', async (
 });
 
 test('SMHI areas keep severity, validity and complete advice', () => {
+  const geometry = { type: 'Polygon', coordinates: [[[18, 59], [18.1, 59], [18.1, 59.1], [18, 59.1], [18, 59]]] };
   const raw = [{ id: 1, event: { sv: 'Regn' }, warningAreas: [
-    { id: 2, areaName: { sv: 'Skåne' }, warningLevel: { code: 'YELLOW', sv: 'Gul' }, descriptions: [{ title: { sv: 'Råd' }, text: { sv: 'Undvik översvämmade vägar.' } }] },
+    { id: 2, areaName: { sv: 'Skåne' }, area: { geometry }, affectedAreas: [{ id: 12 }], warningLevel: { code: 'YELLOW', sv: 'Gul' }, descriptions: [{ title: { sv: 'Råd' }, text: { sv: 'Undvik översvämmade vägar.' } }] },
     { id: 3, warningLevel: { code: 'RED', sv: 'Röd' }, approximateEnd: '2026-09-24T12:00:00Z' }
   ] }];
   const rows = normalizeWarnings(raw);
   assert.equal(rows.length, 2); assert.equal(rows[0].level, 'RED');
   assert.equal(rows[1].descriptions[0].text, 'Undvik översvämmade vägar.');
   assert.equal(rows[0].validTo, '2026-09-24T12:00:00Z');
+  assert.deepEqual(rows[1].geometry, geometry);
+  assert.deepEqual(rows[1].areaCode, [12]);
 });
 
 test('Krisinformation uses article links and rejects unsafe links', () => {
-  const rows = normalizeCrisis([{ Id: 1, Headline: 'Test', Web: 'https://www.krisinformation.se/nyhet', Area: [{ Description: 'Skåne' }] }, { Id: 2, Headline: 'Test', Web: 'javascript:alert(1)' }], 'news');
+  const geometry = { type: 'Polygon', coordinates: [[[18, 59], [18.1, 59], [18.1, 59.1], [18, 59.1], [18, 59]]] };
+  const rows = normalizeCrisis([{ Id: 1, Headline: 'Test', Web: 'https://www.krisinformation.se/nyhet', Area: [{ Description: 'Skåne', Code: '12', Geometry: { type: 'Feature', geometry, properties: {} } }] }, { Id: 2, Headline: 'Test', Web: 'javascript:alert(1)' }], 'news');
   assert.equal(rows[0].source, 'https://www.krisinformation.se/nyhet');
   assert.equal(rows[0].area, 'Skåne');
+  assert.deepEqual(rows[0].areas[0].geometry, geometry);
+  assert.deepEqual(rows[0].geometry, geometry);
+  assert.equal(rows[0].areas[0].code, '12');
   assert.equal(rows[1].source, 'https://www.krisinformation.se/');
 });
 

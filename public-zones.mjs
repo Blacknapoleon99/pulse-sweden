@@ -76,7 +76,7 @@ export function createPublicZoneService({ connectionString = process.env.DATABAS
     await endExpired();
     const currentTime = new Date(now()).toISOString();
     const result = await query(`SELECT id,name,kind,source_title AS "sourceTitle",source_excerpt AS "sourceExcerpt",source_url AS "sourceUrl",source_date AS "sourceDate",valid_from AS "validFrom",valid_to AS "validTo",geometry,updated_at AS "updatedAt" FROM public_zones WHERE status='published' AND valid_from<=$1 AND valid_to>$1 ORDER BY valid_from`, [currentTime]);
-    return { type: 'FeatureCollection', features: result.rows.map(row => ({ type: 'Feature', id: row.id, properties: { name: row.name, kind: row.kind, sourceTitle: row.sourceTitle, sourceExcerpt: row.sourceExcerpt, sourceUrl: row.sourceUrl, sourceDate: row.sourceDate, validFrom: row.validFrom, validTo: row.validTo, updatedAt: row.updatedAt }, geometry: row.geometry })), fetchedAt: new Date(now()).toISOString(), stale: false };
+    return { type: 'FeatureCollection', features: result.rows.map(row => ({ type: 'Feature', id: row.id, properties: { name: row.name, kind: row.kind, sourceTitle: row.sourceTitle, sourceExcerpt: row.sourceExcerpt, sourceUrl: row.sourceUrl, sourceDate: row.sourceDate, validFrom: row.validFrom, validTo: row.validTo, updatedAt: row.updatedAt }, geometry: row.geometry })), status: 'ok', fetchedAt: new Date(now()).toISOString(), stale: false };
   }
   async function listAdmin() {
     await endExpired();
@@ -119,11 +119,11 @@ export function createPublicZoneService({ connectionString = process.env.DATABAS
   async function handle(req, res, url) {
     const send = (status, body) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(req.method === 'HEAD' ? undefined : JSON.stringify(body)); };
     try {
-      if (!available) return send(503, { error: 'Zonregistret kräver databas på servern', status: 'unavailable' });
+      if (!available) return send(503, { error: 'Zonregistret kräver en serverdatabas och är inte konfigurerat i den här miljön', status: 'requires_setup' });
       if (url.pathname === '/api/public-zones' && ['GET', 'HEAD'].includes(req.method)) return send(200, await listPublic());
       if (!url.pathname.startsWith('/api/admin/zones')) return false;
       if (!authorized(req)) return send(401, { error: 'Administratörsnyckel saknas eller är ogiltig' });
-      if (req.method === 'GET' && url.pathname === '/api/admin/zones') return send(200, { items: await listAdmin() });
+      if (req.method === 'GET' && url.pathname === '/api/admin/zones') return send(200, { items: await listAdmin(), status: 'ok', fetchedAt: new Date(now()).toISOString(), stale: false });
       if (req.method !== 'POST') return send(405, { error: 'Metoden stöds inte' });
       const body = await readBody(req);
       if (url.pathname === '/api/admin/zones') return send(201, await createDraft(body));

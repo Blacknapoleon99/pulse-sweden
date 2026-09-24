@@ -9,12 +9,15 @@ import { readPoliceStations, policeStationsStatus } from './police-stations.mjs'
 import { readPoliceStationDetails } from './police-stations.mjs';
 import { policeApiFetch } from './police-api.mjs';
 import { createPublicZoneService } from './public-zones.mjs';
-import { findRouteZonePassages, routeSlice } from './route-analysis.mjs';
+import { findRouteZonePassages, findGeographicItemsAlongRoute, nearestRoutePosition, pointToRouteDistanceMeters, selectApproximateRouteEvents, routeSlice } from './route-analysis.mjs';
 import { readNearbyShelters, shelterSource, shelterStatus } from './shelters.mjs';
 import { createFireRiskService, sampleRouteForFireRisk, selectFireRiskPeriod, SMHI_FIRE_RISK_URL } from './fire-risk.mjs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const pointToSegmentDistanceMeters = (pLat, pLon, lat1, lon1, lat2, lon2) => pointToRouteDistanceMeters(pLat, pLon, [[lon1, lat1], [lon2, lat2]]);
+const minDistanceToRouteMeters = pointToRouteDistanceMeters;
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 // Local secrets are ignored by Git. Hosting environments supply the same variables.
@@ -92,6 +95,8 @@ const publicSources = [
   { id: 'weather', name: 'SMHI – varningar och meddelanden', provider: 'SMHI', scope: 'Väder, vatten och regionala varningar', refresh: 'Var 65:e sekund', detail: 'Varningsnivå, område, giltighet och råd från SMHI. Innehållet återges med källhänvisning.', url: 'https://www.smhi.se/vader/prognoser-och-varningar/varningar-och-meddelanden' },
   { id: 'smhi-fire-risk', name: 'SMHI – brandriskprognos', provider: 'SMHI', status: fireRiskService.snapshot().status, scope: 'Timvis skogsbrandsrisk längs vald rutt', refresh: 'Prognos uppdateras ungefär varje timme; TryggPuls cachar i 20 minuter', detail: 'Punktprognos från SMHI:s modellgrid. Visas som ungefärliga provpunkter längs rutten, inte som brand- eller eldningsförbudszoner.', url: SMHI_FIRE_RISK_URL },
   { id: 'news', name: 'Krisinformation – nyheter', provider: 'Krisinformation.se', scope: 'Nationella och regionala krisnyheter senaste veckan', refresh: 'Var 5:e minut', detail: 'Separat nyhetsflöde, skilt från aktiva VMA.', url: 'https://api.krisinformation.se/v3' },
+  { id: 'krisinformation-vmas', name: 'Krisinformation – VMA', provider: 'Krisinformation.se', scope: 'Aktiva publicerade viktiga meddelanden med områdesuppgift och geometri när källan tillhandahåller den', refresh: 'Var 65:e sekund', detail: 'Geografiska uppgifter bevaras. En VMA utan polygon kan inte matchas exakt mot rutten.', url: 'https://api.krisinformation.se/v3' },
+  { id: 'krisinformation-notices', name: 'Krisinformation – notiser', provider: 'Krisinformation.se', scope: 'Publicerade krisnotiser med områdesuppgift och geometri när källan tillhandahåller den', refresh: 'Var 65:e sekund', detail: 'Geografiska uppgifter bevaras. Notiser utan polygon kan inte matchas exakt mot rutten.', url: 'https://api.krisinformation.se/v3' },
   { id: 'preparedness', name: 'Krisinformation – förbered dig', provider: 'Krisinformation.se', scope: 'Officiella beredskapsguider', refresh: 'Varje timme', detail: 'Praktisk information om att förbereda sig för samhällsstörningar.', url: 'https://www.krisinformation.se/' },
   { id: 'trafikverket', name: 'Trafikverket – väg och järnväg', provider: 'Trafikverket', scope: 'Publicerade väg- och järnvägsstörningar', refresh: 'Var 60:e sekund när tjänsten används', detail: 'Serveranslutning till Trafikverkets öppna API. Aktiva störningar längs en beräknad rutt visas när källan ger geometri.', url: 'https://www.trafikverket.se/e-tjanster/trafikverkets-oppna-api-for-trafikinformation/' },
   { id: 'polisen-stations', name: 'Polisen – polisstationer', provider: 'Polismyndigheten', scope: 'Stationer, tjänster och adresser i Sverige', refresh: 'Daglig cache när tjänsten används', detail: 'Officiellt stationsregister. Stationer visas med adress och länk till öppettider och tjänster.', url: 'https://polisen.se/om-polisen/om-webbplatsen/oppna-data/api-over-polisstationer/' },
@@ -294,6 +299,7 @@ async function fetchEvents() {
   // Ingen cache ännu -> fetchedAt är null -> endpointen svarar 503 (honest, ingen fake-data)
   return {
     ...(eventCache || { events: [], count: 0, fetchedAt: null }),
+    source: upstream,
     stale: Boolean(eventError),
     error: eventError || undefined,
     nextCheckAt: eventLastAttempt ? new Date(eventLastAttempt + refreshIntervalMs).toISOString() : null
@@ -508,47 +514,6 @@ async function fetchBraStats() {
   return { ...braCache, stale: Boolean(braError), error: braError || undefined };
 }
 
-// ==== GEOMETRI: vinkelräta avstånd för säkerhetskorridor ====
-
-// Beräkna vinkelrätt avstånd från punkt (pLat, pLon) till linjesegment ((lat1, lon1)-(lat2, lon2)) i meter
-function pointToSegmentDistanceMeters(pLat, pLon, lat1, lon1, lat2, lon2) {
-  const latMid = ((lat1 + lat2 + pLat) / 3) * (Math.PI / 180);
-  const cosLat = Math.cos(latMid);
-  const kx = 111320 * cosLat;
-  const ky = 110540;
-
-  const px = pLon * kx;
-  const py = pLat * ky;
-  const x1 = lon1 * kx;
-  const y1 = lat1 * ky;
-  const x2 = lon2 * kx;
-  const y2 = lat2 * ky;
-
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  if (dx === 0 && dy === 0) {
-    return Math.hypot(px - x1, py - y1);
-  }
-  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
-  const projX = x1 + t * dx;
-  const projY = y1 + t * dy;
-  return Math.hypot(px - projX, py - projY);
-}
-
-// Beräkna minsta avstånd från punkt till en polygon / ruttlinje
-function minDistanceToRouteMeters(pLat, pLon, coordinates) {
-  let minDist = Infinity;
-  for (let i = 0; i < coordinates.length - 1; i++) {
-    const [lon1, lat1] = coordinates[i];
-    const [lon2, lat2] = coordinates[i + 1];
-    const dist = pointToSegmentDistanceMeters(pLat, pLon, lat1, lon1, lat2, lon2);
-    if (dist < minDist) {
-      minDist = dist;
-    }
-  }
-  return minDist;
-}
-
 const geocoderBase = process.env.GEOCODER_BASE_URL || 'https://nominatim.openstreetmap.org';
 const geocodeRequest = createRequestQueue(async url => (await upstreamFetch(url, 10_000)).json());
 const routeRequest = createRequestQueue(async url => (await upstreamFetch(url, 12_000)).json(), { ttl: 300_000 });
@@ -620,26 +585,7 @@ async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
   // relevans, aldrig för att visa ett exakt avstånd till brott.
   const eventsResult = await fetchEvents();
   const allEvents = (eventsResult.events || []).filter(e => e.ts >= Date.now() - 24 * 3600000);
-
-  // Berörda områdesmarkörer kan ligga långt från den faktiska händelsen.
-  const incidentsNearRoute = [];
-
-  for (const event of allEvents) {
-    if (!event.location || !event.location.gps) continue;
-    const [eLat, eLon] = event.location.gps;
-    const distanceM = minDistanceToRouteMeters(eLat, eLon, coordinates);
-    if (distanceM <= Math.max(bufferMeters, 8_000)) {
-      incidentsNearRoute.push({
-        ...event,
-        locationPrecision: 'Kommunens eller länets ungefärliga kartpunkt',
-        approximateRelevance: true,
-        _sortDistance: distanceM
-      });
-    }
-  }
-
-  incidentsNearRoute.sort((a, b) => a._sortDistance - b._sortDistance);
-  for (const event of incidentsNearRoute) delete event._sortDistance;
+  const incidentsNearRoute = selectApproximateRouteEvents(allEvents, coordinates, { bufferMeters });
 
   const sourceStates = {};
   const routeAreas = [];
@@ -648,7 +594,7 @@ async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
   const networkAreaPassages = [];
   const areaResult = await readPoliceAreas().catch(() => null);
   if (areaResult) {
-    sourceStates['polisen-areas'] = { status: areaResult.stale ? 'stale' : 'ok', fetchedAt: areaResult.checkedAt || null };
+    sourceStates['polisen-areas'] = { status: areaResult.stale ? 'stale' : 'ok', fetchedAt: areaResult.checkedAt || null, dataYear: areaResult.year, source: areaResult.sourceUrl };
     for (const passage of findRouteZonePassages(coordinates, areaResult.features)) {
       const feature = passage.feature;
       const item = {
@@ -665,7 +611,7 @@ async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
     }
   } else sourceStates['polisen-areas'] = { status: 'unavailable', fetchedAt: null };
 
-  const reviewedResult = await publicZoneApi.listPublic().catch(() => null);
+  const reviewedResult = publicZoneDbReady ? await publicZoneApi.listPublic().catch(() => null) : null;
   if (reviewedResult) {
     sourceStates['reviewed-zones'] = { status: 'ok', fetchedAt: reviewedResult.fetchedAt };
     for (const passage of findRouteZonePassages(coordinates, reviewedResult.features)) {
@@ -684,21 +630,32 @@ async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
       if (properties.kind === 'security-zone') securityZonePassages.push(summary);
       else if (properties.kind === 'organized-crime-area') networkAreaPassages.push(summary);
     }
-  } else sourceStates['reviewed-zones'] = { status: 'unavailable', fetchedAt: null };
+  } else sourceStates['reviewed-zones'] = {
+    status: publicZoneApi.available ? 'unavailable' : 'requires_setup',
+    fetchedAt: null,
+    error: publicZoneApi.available ? 'Zonregistret är tillfälligt otillgängligt.' : 'Zonregistret kräver en konfigurerad serverdatabas.'
+  };
   routeAreas.sort((a, b) => a.startMeters - b.startMeters);
   policeAreaPassages.sort((a, b) => a.startMeters - b.startMeters);
   securityZonePassages.sort((a, b) => a.startMeters - b.startMeters);
   networkAreaPassages.sort((a, b) => a.startMeters - b.startMeters);
 
-  const [traffic, weather] = await Promise.all([readTraffic(), feeds.weather.read()]);
-  sourceStates.trafikverket = { status: traffic.status, fetchedAt: traffic.fetchedAt };
-  sourceStates.weather = { status: weather.status, fetchedAt: weather.fetchedAt };
+  const [traffic, weather, crisis] = await Promise.all([readTraffic(), feeds.weather.read(), fetchCrisisUpdates()]);
+  sourceStates.trafikverket = { status: traffic.status, fetchedAt: traffic.fetchedAt, error: traffic.error };
+  sourceStates.weather = { status: weather.status, fetchedAt: weather.fetchedAt, error: weather.error };
+  sourceStates['krisinformation-v3'] = { status: crisis.status, fetchedAt: crisis.fetchedAt, error: crisis.error || undefined };
+  for (const [key, feed] of [['krisinformation-vmas', crisis.sources?.vmas], ['krisinformation-notices', crisis.sources?.notices]]) {
+    sourceStates[key] = { status: feed?.status || 'unavailable', fetchedAt: feed?.fetchedAt || null, error: feed?.error || undefined };
+  }
   const trafficNearRoute = (traffic.items || []).flatMap(item => {
     const geometry = item.geometry;
     const feature = geometry?.type === 'Feature' ? geometry : geometry?.type ? { type: 'Feature', geometry, properties: {} } : null;
     let distanceM = Infinity;
+    let routePositionMeters = Infinity;
+    let passages = [];
     if (feature && ['Polygon', 'MultiPolygon'].includes(feature.geometry.type)) {
-      if (findRouteZonePassages(coordinates, [feature], { sampleMeters: 120 }).length) distanceM = 0;
+      const match = findGeographicItemsAlongRoute(coordinates, [{ ...item, geometry: feature.geometry }])[0];
+      if (match) { distanceM = 0; passages = match.passages; routePositionMeters = passages[0]?.startMeters ?? Infinity; }
     } else {
       const points = [];
       const visit = value => {
@@ -706,16 +663,19 @@ async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
         else if (Array.isArray(value)) value.forEach(visit);
       };
       visit(geometry?.coordinates || geometry);
-      for (const [lat, lon] of points) distanceM = Math.min(distanceM, minDistanceToRouteMeters(lat, lon, coordinates));
+      for (const [lat, lon] of points) {
+        const nearest = nearestRoutePosition(lat, lon, coordinates);
+        if (nearest.distanceMeters < distanceM) { distanceM = nearest.distanceMeters; routePositionMeters = nearest.alongRouteMeters; }
+      }
     }
-    return distanceM <= Math.max(2_000, bufferMeters) ? [{ ...item, approximateRelevance: true }] : [];
-  }).slice(0, 50);
-  const weatherAlongRoute = (weather.items || []).flatMap(item => {
-    const feature = item.geometry?.type === 'Feature' ? item.geometry : item.geometry?.type ? { type: 'Feature', geometry: item.geometry, properties: {} } : null;
-    if (!feature) return [];
-    const passages = findRouteZonePassages(coordinates, [feature], { sampleMeters: 150 });
-    return passages.length ? [{ id: item.id, title: item.title, area: item.area, level: item.level, levelLabel: item.levelLabel, validFrom: item.validFrom, validTo: item.validTo, source: item.source, geometry: feature.geometry, passages: passages.map(p => ({ startMeters: Math.round(p.startMeters), endMeters: Math.round(p.endMeters) })) }] : [];
-  });
+    return distanceM <= Math.max(2_000, bufferMeters) ? [{ ...item, approximateRelevance: true, routePositionMeters: Number.isFinite(routePositionMeters) ? Math.round(routePositionMeters) : null, passages }] : [];
+  }).sort((a, b) => (a.routePositionMeters ?? Infinity) - (b.routePositionMeters ?? Infinity)).slice(0, 50);
+  const weatherAlongRoute = findGeographicItemsAlongRoute(coordinates, weather.items || []);
+  const crisisItems = [...(crisis.vmas || []), ...(crisis.notices || [])];
+  const crisisAlongRoute = findGeographicItemsAlongRoute(coordinates, crisisItems);
+  const crisisWithoutGeometry = crisisItems.filter(item => ![...(item.areas || []).map(area => area.geometry), item.geometry].some(geometry => ['Polygon', 'MultiPolygon'].includes((geometry?.type === 'Feature' ? geometry.geometry : geometry)?.type))).map(item => ({
+    id: item.id, type: item.type, title: item.title, area: item.area || '', publishedAt: item.publishedAt || null, source: item.source
+  }));
 
   const fireRiskSamples = sampleRouteForFireRisk(coordinates);
   const fireRiskResults = await Promise.all(fireRiskSamples.map(async sample => {
@@ -734,8 +694,9 @@ async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
   }));
   const fireRiskStatus = fireRiskService.snapshot();
   sourceStates['smhi-fire-risk'] = {
-    status: fireRiskResults.length && fireRiskResults.every(point => point.status === 'ok') ? 'ok' : fireRiskResults.some(point => ['ok', 'stale'].includes(point.status)) ? 'stale' : fireRiskStatus.status,
-    fetchedAt: fireRiskStatus.fetchedAt
+      status: fireRiskResults.length && fireRiskResults.every(point => point.status === 'ok') ? 'ok' : fireRiskResults.some(point => ['ok', 'stale'].includes(point.status)) ? 'stale' : fireRiskStatus.status,
+    fetchedAt: fireRiskStatus.fetchedAt,
+    error: fireRiskStatus.error
   };
 
   return {
@@ -752,11 +713,13 @@ async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
     policeAreaPassages,
     securityZonePassages,
     networkAreaPassages,
-    trafficNearRoute,
+      trafficNearRoute,
     weatherAlongRoute,
+    crisisAlongRoute,
+    crisisWithoutGeometry,
     fireRiskAlongRoute: fireRiskResults,
     sourceStatus: {
-      'polisen-events': { status: eventsResult.fetchedAt ? eventsResult.stale ? 'stale' : 'ok' : 'unavailable', fetchedAt: eventsResult.fetchedAt },
+      'polisen-events': { status: eventsResult.fetchedAt ? eventsResult.stale ? 'stale' : 'ok' : 'unavailable', fetchedAt: eventsResult.fetchedAt, error: eventsResult.error },
       ...sourceStates
     },
     routeAnalysisUpdatedAt: new Date().toISOString(),
@@ -988,7 +951,7 @@ export const server = http.createServer(async (req, res) => {
 
     // Static File Serving
     let filePath = url.pathname === '/' ? 'index.html' : url.pathname === '/admin' ? 'admin.html' : url.pathname.slice(1);
-    const publicFiles = ['index.html', 'app.js', 'family-client.js', 'family-sw.js', 'style.css', 'admin.html', 'admin.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', ...['layers.png', 'layers-2x.png', 'marker-icon.png', 'marker-icon-2x.png', 'marker-shadow.png'].map(name => 'vendor/leaflet/images/' + name)];
+    const publicFiles = ['index.html', 'app.js', 'route-follow.js', 'family-client.js', 'family-sw.js', 'style.css', 'admin.html', 'admin.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', ...['layers.png', 'layers-2x.png', 'marker-icon.png', 'marker-icon-2x.png', 'marker-shadow.png'].map(name => 'vendor/leaflet/images/' + name)];
     if (!publicFiles.includes(filePath)) return json(req, res, 404, { error: 'Sidan kunde inte hittas' });
     const safePath = path.normalize(path.join(root, filePath));
     if (!safePath.startsWith(root)) {
@@ -1078,10 +1041,12 @@ function sourceStatuses() {
     'polisen-areas': policeAreasStatus(),
     'polisen-zone-news': zoneNewsStatus(),
     'krisinformation-v3': { status: crisisStates.some(s => s.error) ? 'stale' : crisisStates.every(s => s.fetchedAt) ? 'ok' : 'not_checked', fetchedAt: crisisStates.map(s => s.fetchedAt).filter(Boolean).sort()[0] || null },
+    'krisinformation-vmas': observed(feeds.vmas.snapshot().fetchedAt ? feeds.vmas.snapshot() : null, feeds.vmas.snapshot().error),
+    'krisinformation-notices': observed(feeds.notices.snapshot().fetchedAt ? feeds.notices.snapshot() : null, feeds.notices.snapshot().error),
     'civil-shelters': shelterStatus(),
     'smhi-fire-risk': fireRiskService.snapshot(),
     trafikverket: trafficStatus(), 'polisen-stations': policeStationsStatus(),
-    'reviewed-zones': { status: publicZoneApi.available && publicZoneDbReady ? 'on_demand' : 'unavailable', fetchedAt: null },
+    'reviewed-zones': { status: !publicZoneApi.available ? 'requires_setup' : publicZoneDbReady ? 'on_demand' : 'unavailable', fetchedAt: null },
     'osrm-routing': { status: 'on_demand' }, 'nominatim-osm': { status: 'on_demand' }
   };
   return publicSources.map(s => ({ ...s, ...(feeds[s.id] ? observed(feeds[s.id].snapshot().fetchedAt ? feeds[s.id].snapshot() : null, feeds[s.id].snapshot().error) : statuses[s.id] || {}) }));

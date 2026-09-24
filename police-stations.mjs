@@ -6,6 +6,7 @@ let cache = null, attemptedAt = 0, pending = null, lastError = null;
 const detailTtlMs = 6 * 60 * 60_000;
 const detailsCache = new Map();
 const detailsPending = new Map();
+const detailsErrors = new Map();
 
 export function normalizePoliceStations(rows) {
   if (!Array.isArray(rows)) throw new Error('Oväntat svar från Polisens stations-API');
@@ -58,17 +59,32 @@ export function normalizePoliceStationDetails(row) {
 export async function readPoliceStationDetails(id, { fetcher = policeApiFetch, now = Date.now } = {}) {
   if (!/^\d{1,8}$/.test(String(id))) throw Object.assign(new Error('Ogiltigt stations-id'), { status: 400 });
   const key = String(id), cached = detailsCache.get(key);
-  if (cached && now() - cached.cachedAt < detailTtlMs) return cached.value;
+  const result = (entry, stale = false, error) => ({ ...entry.value, fetchedAt: entry.fetchedAt, stale, status: stale ? 'stale' : 'ok', ...(error ? { error } : {}) });
+  if (cached && now() - cached.cachedAt < detailTtlMs) return result(cached);
+  const recentError = detailsErrors.get(key);
+  if (recentError && now() - recentError.at < 60_000) {
+    if (cached) return result(cached, true, recentError.error.message);
+    throw recentError.error;
+  }
   if (!detailsPending.has(key)) {
     const pending = (async () => {
-      const response = await fetcher(`${endpoint}/${id}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
-      if (!response.ok) throw Object.assign(new Error(`Polisens API svarade ${response.status}`), { status: response.status === 429 ? 429 : 502 });
-      const rows = await response.json();
-      const row = Array.isArray(rows) ? rows[0] : rows;
-      if (!row || String(row.id) !== key) throw Object.assign(new Error('Stationens öppettider kunde inte hittas'), { status: 404 });
-      const value = normalizePoliceStationDetails(row);
-      detailsCache.set(key, { value, cachedAt: now() });
-      return value;
+      try {
+        const response = await fetcher(`${endpoint}/${id}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+        if (!response.ok) throw Object.assign(new Error(`Polisens API svarade ${response.status}`), { status: response.status === 429 ? 429 : 502 });
+        const rows = await response.json();
+        const row = Array.isArray(rows) ? rows[0] : rows;
+        if (!row || String(row.id) !== key) throw Object.assign(new Error('Stationens öppettider kunde inte hittas'), { status: 404 });
+        const value = normalizePoliceStationDetails(row);
+        const entry = { value, cachedAt: now(), fetchedAt: new Date(now()).toISOString() };
+        detailsCache.set(key, entry);
+        detailsErrors.delete(key);
+        return result(entry);
+      } catch (error) {
+        const failure = error.status ? error : Object.assign(new Error('Polisens öppettider kunde inte hämtas'), { status: 502 });
+        detailsErrors.set(key, { at: now(), error: failure });
+        if (cached) return result(cached, true, failure.message);
+        throw failure;
+      }
     })().finally(() => detailsPending.delete(key));
     detailsPending.set(key, pending);
   }

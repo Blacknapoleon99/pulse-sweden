@@ -17,7 +17,7 @@
 
   <!-- Leaflet JS -->
   <script src="/vendor/leaflet/leaflet.js" defer></script>
-  <script src="/app.js?v=5" defer></script>
+  <script type="module" src="/app.js?v=6"></script>
   <script src="/family-client.js?v=1" defer></script>
 </head>
 <body>
@@ -165,7 +165,7 @@
         <div class="panel-header">
           <div class="eyebrow">TRYGG NAVIGATION</div>
           <h1>Ruttanalys</h1>
-          <p>Planera en gång- eller bilresa och se myndighetszoner, vädervarningar, trafikstörningar och polisnotiser på ungefärlig områdesnivå längs vägen.</p>
+          <p>Planera en resa och se myndighetszoner, vädervarningar, trafikstörningar och polisnotiser på ungefärlig områdesnivå längs vägen.</p>
         </div>
 
         <div class="route-form">
@@ -214,7 +214,7 @@
             <button id="btn-reroute-current" class="btn-secondary" type="button" hidden>Beräkna om rutten från min position</button>
             <button id="btn-route-view-map" class="btn-secondary" type="button" hidden>Visa rutten på kartan</button>
           </div>
-          <p class="route-follow-help">Efter beräkningen kan du välja <strong>Följ resan med GPS</strong>. Positionen visas på din karta och källorna uppdateras ungefär varje minut medan sidan är öppen och synlig. GPS pausas när du lämnar sidan; webbversionen samlar inte position i bakgrunden.</p>
+          <p class="route-follow-help">Efter beräkningen kan du välja <strong>Följ resan med GPS</strong>. Positionen visas på din karta och källorna uppdateras ungefär varje minut medan sidan är öppen och synlig. GPS pausas när du lämnar sidan; webbversionen samlar inte position i bakgrunden. Polisnotiser kan dröja, och Sverige har ingen offentlig rikstäckande realtidskarta över gängrekrytering eller aktiva säkerhetszoner.</p>
           <p id="route-follow-status" class="route-follow-status" role="status" hidden></p>
           <p id="route-off-course" class="route-follow-status" role="status" hidden></p>
         </div>
@@ -241,6 +241,7 @@
           <section class="route-detail-section"><h4>Granskade myndighetsuppgifter om nätverksområden</h4><div id="route-network-areas-list"></div></section>
           <section class="route-detail-section"><h4>Trafikstörningar längs rutten</h4><div id="route-traffic-list"></div></section>
           <section class="route-detail-section"><h4>Vädervarningar längs rutten</h4><div id="route-weather-list"></div></section>
+          <section class="route-detail-section"><h4>VMA och krisnotiser längs rutten</h4><div id="route-crisis-list" aria-live="polite"></div></section>
           <section class="route-detail-section"><h4>SMHI:s brandriskprognos längs rutten</h4><p class="route-source-status">Timvisa prognospunkter för skogsbrandsrisk i skog och mark. De är ungefärliga modellvärden, inte brandhändelser, trygghetszoner eller eldningsförbud.</p><div id="route-fire-risk-list" aria-live="polite"></div></section>
           <p id="route-source-status" class="route-source-status"></p>
         </div>

@@ -17,6 +17,18 @@ test('publicerade zoner kräver myndighetskälla, datum och polygon i Sverige', 
   assert.throws(() => validatePublicZone({ ...validZone, validTo: '2025-01-16T00:00:00Z' }), /högst 14 dagar/);
 });
 
+test('zon-API:t anger tydligt när serverdatabasen inte är konfigurerad', async () => {
+  const service = createPublicZoneService({ connectionString: '' });
+  const req = Readable.from([]);
+  req.headers = {};
+  req.method = 'GET';
+  let status, text = '';
+  const res = { writeHead(code) { status = code; }, end(value) { text = value || ''; } };
+  await service.handle(req, res, new URL('/api/public-zones', 'https://tryggpuls.test'));
+  assert.equal(status, 503);
+  assert.equal(JSON.parse(text).status, 'requires_setup');
+});
+
 test('zoner blir publika först efter gransknings- och publiceringssteg', async () => {
   const Pool = newDb().adapters.createPg().Pool;
   let now = fixedNow;

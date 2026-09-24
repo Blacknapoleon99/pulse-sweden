@@ -12,7 +12,7 @@ const validCategories = new Set(['Utsatt område', 'Särskilt utsatt område']);
 let snapshot;
 
 export function policeAreasStatus() {
-  return { status: !snapshot ? 'not_checked' : snapshot.stale ? 'stale' : 'ok', fetchedAt: snapshot?.checkedAt || null };
+  return { status: !snapshot ? 'not_checked' : snapshot.stale ? 'stale' : 'ok', fetchedAt: snapshot?.checkedAt || null, dataYear: snapshot?.year || null, source: sourcePage };
 }
 
 function coordinatesToWgs84(coords) {
@@ -59,5 +59,5 @@ export async function readPoliceAreas() {
   // Polisen publishes this assessment as an annual GeoJSON download, not a
   // live API. Use the verified 2025 file bundled with the app; do not scrape
   // the web page or imply that these boundaries describe current incidents.
-  return snapshot;
+  return { ...snapshot, status: snapshot.stale ? 'stale' : 'ok', fetchedAt: snapshot.checkedAt || null };
 }
