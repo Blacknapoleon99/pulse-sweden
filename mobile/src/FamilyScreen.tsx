@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
+import * as SecureStore from "expo-secure-store";
 import MapView, { Circle, Marker } from "react-native-maps";
 import {
   ActivityIndicator,
@@ -30,6 +31,7 @@ type Props = {
   onMessages?: (messages: FamilyMessage[]) => void;
   onOverview?: (overview: FamilyOverview | null) => void;
 };
+type AirTagReference = { id: string; child_name: string; item_name: string };
 
 export function FamilyScreen({
   nearby,
@@ -49,6 +51,7 @@ export function FamilyScreen({
     [inviteCode, setInviteCode] = useState("");
   const [childName, setChildName] = useState(""),
     [itemName, setItemName] = useState("");
+  const [deviceItems, setDeviceItems] = useState<AirTagReference[]>([]);
   const [draft, setDraft] = useState("");
   const [zoneName, setZoneName] = useState(""),
     [zoneAddress, setZoneAddress] = useState("");
@@ -84,6 +87,25 @@ export function FamilyScreen({
   useEffect(() => {
     void refresh();
   }, []);
+  useEffect(() => {
+    if (!overview?.family) { setDeviceItems([]); return; }
+    const key = `tryggpuls-airtags-${overview.user.id}-${overview.family.id}`;
+    let active = true;
+    void SecureStore.getItemAsync(key).then(raw => {
+      if (!active) return;
+      try {
+        const parsed = JSON.parse(raw || '[]');
+        setDeviceItems(Array.isArray(parsed) ? parsed.filter(item => typeof item?.id === 'string' && typeof item?.child_name === 'string' && typeof item?.item_name === 'string').slice(0, 5) : []);
+      } catch { setDeviceItems([]); }
+    }).catch(() => { if (active) setDeviceItems([]); });
+    return () => { active = false; };
+  }, [overview?.user.id, overview?.family?.id]);
+  async function saveDeviceItems(items: AirTagReference[]) {
+    if (!overview?.family) throw new Error('Gå med i en familj först.');
+    const key = `tryggpuls-airtags-${overview.user.id}-${overview.family.id}`;
+    await SecureStore.setItemAsync(key, JSON.stringify(items));
+    setDeviceItems(items);
+  }
   async function action(run: () => Promise<unknown>) {
     setBusy(true);
     setError("");
@@ -263,7 +285,8 @@ export function FamilyScreen({
               en Apple-enhet och internet för att se den. TryggPuls får ingen
               AirTag-position och kan inte ge zon- eller nödlarm för den.
             </Text>
-            {(overview.childItems || []).map((item) => (
+            <Text style={s.note}>Referenserna sparas på denna telefon. Övriga familjemedlemmar ser dem inte automatiskt.</Text>
+            {deviceItems.map((item) => (
               <View key={item.id} style={s.item}>
                 <Text style={s.title}>{item.child_name}</Text>
                 <Text style={s.description}>{item.item_name} · Visa i Hitta → Föremål</Text>
@@ -272,7 +295,7 @@ export function FamilyScreen({
                     label="Ta bort referens"
                     secondary
                     disabled={busy}
-                    onPress={() => action(() => familyRequest(`child-items/${encodeURIComponent(item.id)}`, "DELETE"))}
+                    onPress={() => action(() => saveDeviceItems(deviceItems.filter(saved => saved.id !== item.id)))}
                   />
                 )}
               </View>
@@ -285,7 +308,10 @@ export function FamilyScreen({
                   label="Spara AirTag-referens"
                   disabled={busy}
                   onPress={() => action(async () => {
-                    await familyRequest("child-items", "POST", { childName, itemName });
+                    const child = childName.trim(), item = itemName.trim();
+                    if (!child || !item) throw new Error('Ange barnets namn och AirTagens namn i Hitta.');
+                    if (deviceItems.length >= 5) throw new Error('Du kan spara högst fem AirTag-referenser på denna telefon.');
+                    await saveDeviceItems([...deviceItems, { id: `${Date.now()}-${Math.random()}`, child_name: child, item_name: item }]);
                     setChildName("");
                     setItemName("");
                   })}

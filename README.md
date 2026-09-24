@@ -45,6 +45,8 @@ Familjen kan spara barnets namn och namnet på en AirTag som sitter på en tillh
 
 Polisens 2025-GeoJSON för bedömda utsatta områden finns som reservkopia i `data/`. Servern kontrollerar [Polisens lägesbild och geodata](https://polisen.se/om-polisen/polisens-arbete/utsatta-omraden/) efter en ny officiell version, validerar arkivet och transformerar SWEREF 99 TM till WGS84. Varje familjemedlem kan frivilligt slå på inträdesvarningar för dessa områden. Första GPS-positionen skickar inget larm; varningar kräver högst 50 meters osäkerhet, färsk källkontroll och ett nytt inträde. Högst en varning per område och dag skickas. Detta är en periodisk områdesbedömning, inte en karta över pågående gängrekrytering eller brott. Tillfälliga säkerhetszoner har separata beslut, kartor och slutdatum. Något verifierat nationellt polygon-API för dem har inte hittats, så de visas inte som automatiska GPS-zoner.
 
+I Expo-demon sparas AirTag-referenser lokalt på den egna telefonen (högst fem); andra familjemedlemmar ser dem inte automatiskt. Webbversionen sparar referenserna i familjekontot.
+
 ### Konfiguration
 
 Kopiera `.env.example` till `.env.local` för lokal körning. Filen är Git-ignorerad och läses vid start med Node 22 (eller Node 20.12+). I Render anges variablerna i tjänstens miljöinställningar.

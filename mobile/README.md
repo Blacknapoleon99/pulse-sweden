@@ -14,7 +14,7 @@ The demo opens on a compact native home dashboard based on the supplied sketch. 
 
 The prototype does **not** run location sharing in the background or send native safety push alerts. Expo Go does not support the required background location behavior. A production native build would require background permission handling and device testing. Police reports are delayed and their map points represent approximate areas. Family messages are available only to authenticated members of the same family; the server keeps them for 30 days. The backend must include the native bearer-token and chat endpoints for these features to work.
 
-The family screen can save an AirTag name for a child's belongings and explains how to find the item in Apple's Find My app. It cannot read AirTag locations or trigger TryggPuls geofence alerts from them.
+The family screen can save up to five AirTag names for a child's belongings on this phone and explains how to find each item in Apple's Find My app. These names stay on this phone and are not shared with other family members. The app cannot read AirTag locations or trigger TryggPuls geofence alerts from them.
 
 ## Checks
 
