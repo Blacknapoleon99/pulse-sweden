@@ -34,6 +34,30 @@ export type EventsResponse = {
   stale?: boolean;
   error?: string;
 };
+export type Bulletin = {
+  id?: string;
+  title: string;
+  summary?: string;
+  area?: string;
+  level?: string;
+  levelLabel?: string;
+  publishedAt?: string;
+  validTo?: string;
+  source?: string;
+  url?: string;
+};
+export type FeedResponse = {
+  items?: Bulletin[];
+  fetchedAt?: string;
+  stale?: boolean;
+  status?: string;
+};
+export type CrisisResponse = {
+  vmas?: Bulletin[];
+  notices?: Bulletin[];
+  fetchedAt?: string;
+  stale?: boolean;
+};
 export type AreasResponse = {
   features?: Feature[];
   year?: number;
