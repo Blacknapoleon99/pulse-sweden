@@ -4,6 +4,7 @@ import pg from 'pg';
 const officialHosts = ['polisen.se', 'krisinformation.se', 'smhi.se', 'mcf.se', 'msb.se', 'lansstyrelsen.se'];
 const kinds = new Set(['security-zone', 'organized-crime-area']);
 const states = new Set(['draft', 'review', 'published', 'ended']);
+const maxSecurityZoneDurationMs = 14 * 24 * 60 * 60 * 1000;
 const sha = value => createHash('sha256').update(value).digest();
 const asIsoDate = (value, optional = false) => {
   if (optional && !value) return null;
@@ -42,8 +43,12 @@ export function validatePublicZone(input, { now = Date.now } = {}) {
   if (coordinateTotal < 4 || coordinateTotal > 20_000) throw Object.assign(new Error('Polygonen måste ha 4–20 000 koordinater'), { status: 400 });
   const sourceDate = asIsoDate(input.sourceDate);
   const validFrom = asIsoDate(input.validFrom || new Date(now()).toISOString());
-  const validTo = asIsoDate(input.validTo, true);
+  if (!input.validTo) throw Object.assign(new Error('Ange sista giltighetsdag eller nästa granskningsdag'), { status: 400 });
+  const validTo = asIsoDate(input.validTo);
   if (validTo && Date.parse(validTo) <= Date.parse(validFrom)) throw Object.assign(new Error('Giltig till måste vara efter giltig från'), { status: 400 });
+  if (input.kind === 'security-zone' && Date.parse(validTo) - Date.parse(validFrom) > maxSecurityZoneDurationMs) {
+    throw Object.assign(new Error('Ett säkerhetszonsbeslut får gälla i högst 14 dagar. Ange sluttiden från beslutet.'), { status: 400 });
+  }
   return { name, kind: input.kind, sourceTitle, sourceExcerpt, sourceUrl, sourceDate, validFrom, validTo, geometry };
 }
 
@@ -56,14 +61,25 @@ export function createPublicZoneService({ connectionString = process.env.DATABAS
     await query(`CREATE TABLE IF NOT EXISTS public_zones (id text PRIMARY KEY, name text NOT NULL, kind text NOT NULL, source_title text NOT NULL, source_excerpt text NOT NULL, source_url text NOT NULL, source_date timestamptz NOT NULL, valid_from timestamptz NOT NULL, valid_to timestamptz, geometry jsonb NOT NULL, status text NOT NULL CHECK (status IN ('draft','review','published','ended')), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())`);
     await query(`CREATE TABLE IF NOT EXISTS public_zone_audit (id text PRIMARY KEY, zone_id text NOT NULL, action text NOT NULL, actor text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), detail jsonb NOT NULL DEFAULT '{}'::jsonb)`);
   }
-  async function audit(id, action, detail = {}) {
-    await query('INSERT INTO public_zone_audit(id,zone_id,action,actor,detail) VALUES($1,$2,$3,$4,$5)', [randomUUID(), id, action, 'admin-token', JSON.stringify(detail)]);
+  async function audit(id, action, detail = {}, actor = 'admin-token') {
+    await query('INSERT INTO public_zone_audit(id,zone_id,action,actor,detail) VALUES($1,$2,$3,$4,$5)', [randomUUID(), id, action, actor, JSON.stringify(detail)]);
+  }
+  async function endExpired() {
+    const currentTime = new Date(now()).toISOString();
+    const expired = await query("SELECT id FROM public_zones WHERE status='published' AND (valid_to IS NULL OR valid_to <= $1)", [currentTime]);
+    for (const row of expired.rows) {
+      const result = await query("UPDATE public_zones SET status='ended',updated_at=$1 WHERE id=$2 AND status='published' AND (valid_to IS NULL OR valid_to <= $1)", [currentTime, row.id]);
+      if (result.rowCount) await audit(row.id, 'auto-ended-expired', { expiredAt: currentTime }, 'system');
+    }
   }
   async function listPublic() {
-    const result = await query(`SELECT id,name,kind,source_title AS "sourceTitle",source_excerpt AS "sourceExcerpt",source_url AS "sourceUrl",source_date AS "sourceDate",valid_from AS "validFrom",valid_to AS "validTo",geometry,updated_at AS "updatedAt" FROM public_zones WHERE status='published' AND valid_from<=now() AND (valid_to IS NULL OR valid_to>now()) ORDER BY valid_from`);
+    await endExpired();
+    const currentTime = new Date(now()).toISOString();
+    const result = await query(`SELECT id,name,kind,source_title AS "sourceTitle",source_excerpt AS "sourceExcerpt",source_url AS "sourceUrl",source_date AS "sourceDate",valid_from AS "validFrom",valid_to AS "validTo",geometry,updated_at AS "updatedAt" FROM public_zones WHERE status='published' AND valid_from<=$1 AND valid_to>$1 ORDER BY valid_from`, [currentTime]);
     return { type: 'FeatureCollection', features: result.rows.map(row => ({ type: 'Feature', id: row.id, properties: { name: row.name, kind: row.kind, sourceTitle: row.sourceTitle, sourceExcerpt: row.sourceExcerpt, sourceUrl: row.sourceUrl, sourceDate: row.sourceDate, validFrom: row.validFrom, validTo: row.validTo, updatedAt: row.updatedAt }, geometry: row.geometry })), fetchedAt: new Date(now()).toISOString(), stale: false };
   }
   async function listAdmin() {
+    await endExpired();
     const result = await query(`SELECT id,name,kind,source_title AS "sourceTitle",source_excerpt AS "sourceExcerpt",source_url AS "sourceUrl",source_date AS "sourceDate",valid_from AS "validFrom",valid_to AS "validTo",geometry,status,created_at AS "createdAt",updated_at AS "updatedAt" FROM public_zones ORDER BY updated_at DESC LIMIT 200`);
     return result.rows;
   }
@@ -81,7 +97,7 @@ export function createPublicZoneService({ connectionString = process.env.DATABAS
     if (!prior) throw Object.assign(new Error('Zonen finns inte'), { status: 404 });
     const allowed = { review: ['draft'], published: ['review'], ended: ['published'] };
     if (!allowed[target]?.includes(prior.status)) throw Object.assign(new Error(`Kan inte ändra ${prior.status} till ${target}`), { status: 409 });
-    if (target === 'published' && (Date.parse(prior.valid_from) > now() || (prior.valid_to && Date.parse(prior.valid_to) <= now()))) throw Object.assign(new Error('Zonen kan inte publiceras eftersom giltighetstiden har passerat'), { status: 409 });
+    if (target === 'published' && (!prior.valid_to || Date.parse(prior.valid_from) > now() || Date.parse(prior.valid_to) <= now())) throw Object.assign(new Error('Zonen kan inte publiceras utan en giltig start- och sluttid.'), { status: 409 });
     await query('UPDATE public_zones SET status=$1,updated_at=now() WHERE id=$2', [target, id]);
     await audit(id, target);
     return { id, status: target };
@@ -101,7 +117,7 @@ export function createPublicZoneService({ connectionString = process.env.DATABAS
     try { return JSON.parse(raw); } catch { throw Object.assign(new Error('Ogiltig JSON'), { status: 400 }); }
   }
   async function handle(req, res, url) {
-    const send = (status, body) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': status === 200 && url.pathname === '/api/public-zones' ? 'public, max-age=60' : 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(req.method === 'HEAD' ? undefined : JSON.stringify(body)); };
+    const send = (status, body) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(req.method === 'HEAD' ? undefined : JSON.stringify(body)); };
     try {
       if (!available) return send(503, { error: 'Zonregistret kräver databas på servern', status: 'unavailable' });
       if (url.pathname === '/api/public-zones' && ['GET', 'HEAD'].includes(req.method)) return send(200, await listPublic());

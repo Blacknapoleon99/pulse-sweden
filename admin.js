@@ -36,6 +36,26 @@ $('#admin-refresh').addEventListener('click', async () => {
   catch (error) { $('#admin-status').textContent = error.message; }
 });
 
+const zoneForm = $('#zone-form');
+const zoneKind = zoneForm.elements.kind;
+const validFromField = zoneForm.elements.validFrom;
+const validToField = zoneForm.elements.validTo;
+function localDateTimeValue(date) {
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+function updateValidityLimit() {
+  validToField.removeAttribute('max');
+  if (zoneKind.value !== 'security-zone') return;
+  const start = new Date(validFromField.value || Date.now());
+  if (!Number.isFinite(start.getTime())) return;
+  const latestEnd = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000);
+  validToField.max = localDateTimeValue(latestEnd);
+}
+zoneKind.addEventListener('change', updateValidityLimit);
+validFromField.addEventListener('change', updateValidityLimit);
+updateValidityLimit();
+
 $('#zone-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;

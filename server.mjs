@@ -643,19 +643,25 @@ async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
 
   const sourceStates = {};
   const routeAreas = [];
+  const policeAreaPassages = [];
+  const securityZonePassages = [];
+  const networkAreaPassages = [];
   const areaResult = await readPoliceAreas().catch(() => null);
   if (areaResult) {
     sourceStates['polisen-areas'] = { status: areaResult.stale ? 'stale' : 'ok', fetchedAt: areaResult.checkedAt || null };
     for (const passage of findRouteZonePassages(coordinates, areaResult.features)) {
       const feature = passage.feature;
-      routeAreas.push({
+      const item = {
         id: `police-${feature.id}`, name: feature.properties.name, kind: 'police-area',
         category: feature.properties.category, locality: feature.properties.locality,
         sourceTitle: `Polisens lägesbild ${areaResult.year}`, sourceUrl: areaResult.sourceUrl,
         sourceDate: `${areaResult.year}`, stale: Boolean(areaResult.stale),
         startMeters: Math.round(passage.startMeters), endMeters: Math.round(passage.endMeters),
         line: routeSlice(coordinates, passage.startMeters, passage.endMeters)
-      });
+      };
+      routeAreas.push(item);
+      const { line, ...summary } = item;
+      policeAreaPassages.push(summary);
     }
   } else sourceStates['polisen-areas'] = { status: 'unavailable', fetchedAt: null };
 
@@ -664,17 +670,25 @@ async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
     sourceStates['reviewed-zones'] = { status: 'ok', fetchedAt: reviewedResult.fetchedAt };
     for (const passage of findRouteZonePassages(coordinates, reviewedResult.features)) {
       const properties = passage.feature.properties;
-      routeAreas.push({
+      const item = {
         id: passage.feature.id, name: properties.name, kind: properties.kind,
-        category: properties.kind === 'security-zone' ? 'Aktiv säkerhetszon' : 'Myndighetsuppgift om kriminellt nätverk',
+        category: properties.kind === 'security-zone' ? 'Aktiv säkerhetszon' : 'Granskat myndighetsunderlag om nätverksområde',
         locality: '', sourceTitle: properties.sourceTitle, sourceUrl: properties.sourceUrl,
+        sourceExcerpt: properties.sourceExcerpt,
         sourceDate: properties.sourceDate, validFrom: properties.validFrom, validTo: properties.validTo,
         startMeters: Math.round(passage.startMeters), endMeters: Math.round(passage.endMeters),
         line: routeSlice(coordinates, passage.startMeters, passage.endMeters)
-      });
+      };
+      routeAreas.push(item);
+      const { line, ...summary } = item;
+      if (properties.kind === 'security-zone') securityZonePassages.push(summary);
+      else if (properties.kind === 'organized-crime-area') networkAreaPassages.push(summary);
     }
   } else sourceStates['reviewed-zones'] = { status: 'unavailable', fetchedAt: null };
   routeAreas.sort((a, b) => a.startMeters - b.startMeters);
+  policeAreaPassages.sort((a, b) => a.startMeters - b.startMeters);
+  securityZonePassages.sort((a, b) => a.startMeters - b.startMeters);
+  networkAreaPassages.sort((a, b) => a.startMeters - b.startMeters);
 
   const [traffic, weather] = await Promise.all([readTraffic(), feeds.weather.read()]);
   sourceStates.trafikverket = { status: traffic.status, fetchedAt: traffic.fetchedAt };
@@ -735,6 +749,9 @@ async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
     bufferMeters,
     geometry: primaryRoute.geometry,
     routeAreas,
+    policeAreaPassages,
+    securityZonePassages,
+    networkAreaPassages,
     trafficNearRoute,
     weatherAlongRoute,
     fireRiskAlongRoute: fireRiskResults,

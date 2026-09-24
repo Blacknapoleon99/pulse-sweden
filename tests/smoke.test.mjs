@@ -10,7 +10,11 @@ test('HTTP routing, input validation, health, HEAD and private files', async () 
   try {
     const home = await fetch(base);
     assert.equal(home.status, 200);
-    assert.match(await home.text(), /panel-information/);
+    const homeHtml = await home.text();
+    assert.match(homeHtml, /panel-information/);
+    assert.match(homeHtml, /data-tab="nara"/);
+    assert.match(homeHtml, /map-layers-panel/);
+    assert.match(homeHtml, /route-security-zones-list/);
     const css = await fetch(base + '/vendor/leaflet/leaflet.css');
     assert.equal(css.status, 200);
     assert.match(await css.text(), /\.leaflet-tile/);

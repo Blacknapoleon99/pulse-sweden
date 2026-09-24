@@ -20,11 +20,11 @@
         <label>Länk till myndighetskällan<input name="sourceUrl" type="url" required placeholder="https://polisen.se/…"></label>
         <label>Publicerat eller beslutat<input name="sourceDate" type="date" required></label>
         <label>Giltigt från<input name="validFrom" type="datetime-local" required></label>
-        <label>Giltigt till<input name="validTo" type="datetime-local"></label>
+        <label>Giltigt till / granska senast<input name="validTo" type="datetime-local" required></label>
       </div>
-      <label>Källans relevanta utdrag<textarea name="sourceExcerpt" maxlength="1000" required rows="3" placeholder="Kort citat eller sammanfattning som stöder den publicerade zonen"></textarea></label>
+      <label>Ordagrant utdrag ur myndighetskällan<textarea name="sourceExcerpt" maxlength="1000" required rows="3" placeholder="Klistra in ett kort ordagrant utdrag som styrker uppgiften och dess gräns eller giltighet"></textarea></label>
       <label>GeoJSON-geometri i WGS84<textarea name="geometry" required rows="8" spellcheck="false" placeholder='{"type":"Polygon","coordinates":[[[18.0,59.0],[18.01,59.0],[18.01,59.01],[18.0,59.01],[18.0,59.0]]]} '></textarea></label>
-      <p>Endast polygoner inom Sverige godtas. Säkerhetszoner publiceras inte utan gränser som kan styrkas av beslutets karta.</p>
+      <p id="zone-validity-help">Alla uppgifter behöver ett slutdatum eller sista granskningsdag. När datumet passeras döljs uppgiften och den avslutas automatiskt. Säkerhetszoner får enligt beslutet gälla i högst 14 dagar och publiceras bara med gränser som kan styrkas av beslutets karta.</p>
       <button class="btn-primary" type="submit">Spara som utkast</button>
     </form>
     <section class="admin-card" aria-labelledby="zone-list-heading"><div class="admin-list-heading"><h2 id="zone-list-heading">Publiceringar och granskning</h2><button id="admin-refresh" class="btn-secondary" disabled>Uppdatera lista</button></div><div id="admin-zones" aria-live="polite"><p>Anslut med administratörsnyckel för att visa zonlistan.</p></div></section>

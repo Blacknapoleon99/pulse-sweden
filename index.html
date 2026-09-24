@@ -214,6 +214,7 @@
             <button id="btn-reroute-current" class="btn-secondary" type="button" hidden>Beräkna om rutten från min position</button>
             <button id="btn-route-view-map" class="btn-secondary" type="button" hidden>Visa rutten på kartan</button>
           </div>
+          <p class="route-follow-help">Efter beräkningen kan du välja <strong>Följ resan med GPS</strong>. Positionen visas på din karta och källorna uppdateras ungefär varje minut medan sidan är öppen och synlig. GPS pausas när du lämnar sidan; webbversionen samlar inte position i bakgrunden.</p>
           <p id="route-follow-status" class="route-follow-status" role="status" hidden></p>
           <p id="route-off-course" class="route-follow-status" role="status" hidden></p>
         </div>
@@ -235,7 +236,9 @@
             <h4>Polisnotiser i ungefärligt område (<span id="route-incidents-count">0</span>)</h4>
             <div id="route-incidents-list" class="route-incidents-list"></div>
           </div>
-          <section class="route-detail-section"><h4>Zoner rutten passerar</h4><div id="route-areas-list"></div></section>
+          <section class="route-detail-section"><h4>Polisens publicerade områdesbedömningar</h4><div id="route-area-assessments-list"></div></section>
+          <section class="route-detail-section"><h4>Aktiva säkerhetszoner</h4><div id="route-security-zones-list"></div></section>
+          <section class="route-detail-section"><h4>Granskade myndighetsuppgifter om nätverksområden</h4><div id="route-network-areas-list"></div></section>
           <section class="route-detail-section"><h4>Trafikstörningar längs rutten</h4><div id="route-traffic-list"></div></section>
           <section class="route-detail-section"><h4>Vädervarningar längs rutten</h4><div id="route-weather-list"></div></section>
           <section class="route-detail-section"><h4>SMHI:s brandriskprognos längs rutten</h4><p class="route-source-status">Timvisa prognospunkter för skogsbrandsrisk i skog och mark. De är ungefärliga modellvärden, inte brandhändelser, trygghetszoner eller eldningsförbud.</p><div id="route-fire-risk-list" aria-live="polite"></div></section>
@@ -476,8 +479,13 @@
 
         <div class="map-quick-actions">
           <button id="btn-my-location" class="btn-map-control" title="Hitta min position">📍 Min position</button>
-          <button id="btn-police-areas" class="btn-map-control" type="button" aria-pressed="true" title="Visa eller dölj Polisens bedömda områden">▧ Polisens områden</button>
-          <button id="btn-reset-map" class="btn-map-control" title="Återställ kartvyn">🇸🇪 Hela Sverige</button>
+          <details id="map-layers-panel" class="map-layer-panel">
+            <summary class="btn-map-control">▧ Kartlager</summary>
+            <div class="map-layer-options" role="group" aria-label="Kartlager och kartvy">
+              <button id="btn-police-areas" class="btn-map-control" type="button" aria-pressed="true">Polisens områdesbedömningar</button>
+              <button id="btn-reset-map" class="btn-map-control" type="button">Återställ kartvy · hela Sverige</button>
+            </div>
+          </details>
         </div>
       </div>
 

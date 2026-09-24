@@ -1533,8 +1533,18 @@ select:focus {
 .map-quick-actions {
   pointer-events: auto;
   display: flex;
+  align-items: center;
+  flex-shrink: 0;
   gap: 6px;
 }
+
+.map-layer-panel { position: relative; }
+.map-layer-panel > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; white-space: nowrap; }
+.map-layer-panel > summary::-webkit-details-marker { display: none; }
+.map-layer-panel > summary::after { content: '⌄'; font-size: 17px; line-height: 1; }
+.map-layer-panel[open] > summary::after { content: '⌃'; }
+.map-layer-options { position: absolute; top: calc(100% + 8px); right: 0; z-index: 600; display: grid; gap: 8px; width: min(280px, calc(100vw - 32px)); padding: 10px; border: 1px solid var(--border-color); border-radius: 14px; background: var(--bg-card); box-shadow: 0 8px 24px #173a2925; }
+.map-layer-options .btn-map-control { width: 100%; justify-content: flex-start; text-align: left; white-space: normal; font: 600 13px/1.35 var(--font-body); text-transform: none; }
 
 .btn-map-control {
   background: #0d131a;
@@ -2174,6 +2184,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .map-floating-title h2 { color: var(--text-main); }
 .map-floating-title .eyebrow { color: var(--accent-emerald); background: transparent; border: 0; }
 .btn-map-control { font-size: 13px; box-shadow: 0 2px 8px #173a2918; }
+.map-layer-options { background: #fff; }
 .map-legend { color: var(--text-main); background: #ffffffed; border: 1px solid var(--border-color); border-radius: 14px; box-shadow: 0 4px 14px #15332318; }
 #sources-dialog, #legal-dialog, #more-dialog { border: 1px solid var(--border-color); border-radius: 20px; padding: 28px; background: #fff; color: var(--text-main); box-shadow: 0 20px 70px #173a2933; }
 #sources-dialog::backdrop, #legal-dialog::backdrop, #more-dialog::backdrop { background: #14291f77; backdrop-filter: blur(2px); }
@@ -2185,6 +2196,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .route-result-card { padding: 18px; }
 .route-detail-section { margin-top: 16px; padding: 14px; border: 1px solid var(--border-color); border-radius: 14px; background: #f8fbf9; }
 .route-detail-section h4 { margin-bottom: 8px; }
+.route-source-excerpt { margin: 10px 0; padding: 10px 12px; border-left: 3px solid var(--accent-emerald); color: var(--text-muted); background: var(--bg-card); border-radius: 0 8px 8px 0; font-size: 13px; line-height: 1.55; }
 .route-zone-item, .nearby-card, .route-incident-item { margin: 9px 0; padding: 13px; border: 1px solid var(--border-color); border-radius: 12px; background: #fff; }
 .route-zone-item a, .nearby-card a { display: inline-block; margin-top: 6px; }
 .route-fire-risk-item strong { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
@@ -2197,6 +2209,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .fire-risk-5 { background: #ad3823; }
 .fire-risk-6 { background: #7f1d2d; }
 .route-source-status, .route-follow-status, .nearby-updated { color: var(--text-muted); font-size: 13px; }
+.route-follow-help { max-width: 72ch; margin: 10px 0 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
 .source-warning { color: #805411 !important; background: #fff5df; border-radius: 9px; padding: 8px 10px; }
 .nearby-search-card { padding: 16px; }
 .nearby-search-card > label { display: block; font-weight: 700; margin-bottom: 6px; }
@@ -2248,6 +2261,7 @@ body[data-theme="dark"] {
 body[data-theme="dark"] .nav-tab.active, body[data-theme="dark"] .nearby-overview section, body[data-theme="dark"] .route-detail-section, body[data-theme="dark"] .more-links button, body[data-theme="dark"] .more-links a { background: #1a2a22; color: var(--text-main); }
 body[data-theme="dark"] .btn-secondary, body[data-theme="dark"] .btn-subtle, body[data-theme="dark"] .btn-map-control, body[data-theme="dark"] .route-zone-item, body[data-theme="dark"] .nearby-card, body[data-theme="dark"] #sources-dialog, body[data-theme="dark"] #legal-dialog, body[data-theme="dark"] #more-dialog, body[data-theme="dark"] input, body[data-theme="dark"] select, body[data-theme="dark"] textarea { background: #17211d; color: var(--text-main); }
 body[data-theme="dark"] .map-top-bar .status-pill, body[data-theme="dark"] .map-floating-title, body[data-theme="dark"] .map-legend { color: var(--text-main); background: #111a17ed; }
+body[data-theme="dark"] .map-layer-options { background: #111a17; }
 body[data-theme="dark"] .btn-primary { background: #237c57; border-color: #237c57; color: #fff; }
 body[data-theme="dark"] .emergency-link { color: #fff; }
 body[data-theme="dark"] .source-warning { color: #ffdf9a !important; background: #392f1e; }

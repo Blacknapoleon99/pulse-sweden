@@ -562,8 +562,14 @@ function renderRouteResult(data) {
     `).join('');
   }
 
-  const routeAreas = data.routeAreas || [];
-  $('#route-areas-list').innerHTML = routeAreas.length ? routeAreas.map(zone => `<article class="route-zone-item"><strong>${esc(zone.category)} · ${esc(zone.name)}</strong><p>${esc(zone.locality)}${zone.locality ? ' · ' : ''}${(zone.startMeters / 1000).toFixed(1)}–${(zone.endMeters / 1000).toFixed(1)} km längs rutten${zone.validTo ? ` · gilt till ${esc(formatSwedishTime(Date.parse(zone.validTo)))}` : ''}</p><a href="${esc(zone.sourceUrl)}" target="_blank" rel="noopener">${esc(zone.sourceTitle)} ↗</a></article>`).join('') : '<p>Inga zonpassager hittades i tillgängliga gränsdata.</p>';
+  const legacyAreas = data.routeAreas || [];
+  const policeAreaPassages = data.policeAreaPassages || legacyAreas.filter(zone => zone.kind === 'police-area');
+  const securityZonePassages = data.securityZonePassages || legacyAreas.filter(zone => zone.kind === 'security-zone');
+  const networkAreaPassages = data.networkAreaPassages || legacyAreas.filter(zone => zone.kind === 'organized-crime-area');
+  const renderPassages = (items, { sourceWording = false } = {}) => items.length ? items.map(zone => `<article class="route-zone-item"><strong>${esc(zone.category)} · ${esc(zone.name)}</strong><p>${esc(zone.locality || '')}${zone.locality ? ' · ' : ''}${(zone.startMeters / 1000).toFixed(1)}–${(zone.endMeters / 1000).toFixed(1)} km längs rutten${zone.sourceDate ? ` · underlag ${esc(String(zone.sourceDate).slice(0, 10))}` : ''}${zone.validTo ? ` · gilt till ${esc(formatSwedishTime(Date.parse(zone.validTo)))}` : ''}${zone.stale ? ' · underlaget kan vara inaktuellt' : ''}</p>${sourceWording && zone.sourceExcerpt ? `<blockquote class="route-source-excerpt">${esc(zone.sourceExcerpt)}</blockquote>` : ''}<a href="${esc(zone.sourceUrl)}" target="_blank" rel="noopener">${esc(zone.sourceTitle)} ↗</a></article>`).join('') : '<p>Inga passager hittades i tillgängliga, giltiga gränsdata.</p>';
+  $('#route-area-assessments-list').innerHTML = renderPassages(policeAreaPassages);
+  $('#route-security-zones-list').innerHTML = renderPassages(securityZonePassages, { sourceWording: true });
+  $('#route-network-areas-list').innerHTML = renderPassages(networkAreaPassages, { sourceWording: true });
   const traffic = data.trafficNearRoute || [];
   $('#route-traffic-list').innerHTML = traffic.length ? traffic.map(item => `<article class="route-zone-item"><strong>${esc(item.title)}</strong><p>${esc(item.description || item.location || '')}${item.road ? ` · ${esc(item.road)}` : ''}${item.severity ? ` · ${esc(item.severity)}` : ''}</p><small>${item.modifiedAt ? `Uppdaterad ${esc(formatSwedishTime(Date.parse(item.modifiedAt)))}` : 'Publicerad trafikinformation'} · kartläge kan vara ungefärligt</small><a href="${esc(item.source)}" target="_blank" rel="noopener">Trafikverket ↗</a></article>`).join('') : '<p>Inga matchande trafikstörningar hittades eller så saknas precis geometri i källan.</p>';
   const weather = data.weatherAlongRoute || [];
@@ -621,7 +627,7 @@ function renderRouteOnMap() {
     const points = zone.line.map(([lon, lat]) => [lat, lon]);
     const color = zone.kind === 'security-zone' ? '#b42332' : zone.kind === 'organized-crime-area' ? '#7946a8' : '#c27a13';
     L.polyline(points, { color, weight: 11, opacity: 0.8, lineCap: 'round', lineJoin: 'round' })
-      .bindPopup('<strong>' + esc(zone.category) + ' · ' + esc(zone.name) + '</strong><br>' + esc(zone.sourceTitle) + '<br><a href="' + esc(zone.sourceUrl) + '" target="_blank" rel="noopener">Öppna myndighetskällan ↗</a>')
+      .bindPopup('<strong>' + esc(zone.category) + ' · ' + esc(zone.name) + '</strong><br>' + esc(zone.sourceTitle) + (zone.sourceDate ? '<br>Underlag: ' + esc(String(zone.sourceDate).slice(0, 10)) : '') + (zone.sourceExcerpt ? '<br><small>' + esc(zone.sourceExcerpt.slice(0, 240)) + '</small>' : '') + '<br><a href="' + esc(zone.sourceUrl) + '" target="_blank" rel="noopener">Öppna myndighetskällan ↗</a>')
       .addTo(routeLayer);
   }
 

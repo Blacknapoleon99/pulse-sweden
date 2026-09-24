@@ -7,6 +7,12 @@ let lastError = null;
 
 const escapeXml = value => String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 const asArray = value => value == null ? [] : Array.isArray(value) ? value : [value];
+function redactTrafficError(error) {
+  let message = String(error?.message || 'Trafikverkets API kunde inte hämtas');
+  const secret = process.env.TRAFIKVERKET_API_KEY;
+  if (secret) for (const candidate of new Set([secret, escapeXml(secret), encodeURIComponent(secret)])) message = message.replaceAll(candidate, '[redigerad]');
+  return message.slice(0, 500);
+}
 
 function parseWktGeometry(value) {
   if (value && typeof value === 'object') return value.type ? value : value.coordinates ? { type: 'LineString', coordinates: value.coordinates } : null;
@@ -72,7 +78,7 @@ export async function readTraffic({ fetcher = fetch, now = Date.now } = {}) {
         cache = { items: normalizeTrafficResponse(payload, now()), fetchedAt: new Date(now()).toISOString() };
         lastError = null;
       } catch (error) {
-        lastError = error.message || 'Trafikverkets API kunde inte hämtas';
+        lastError = redactTrafficError(error);
         console.warn('[trafikverket] Källa otillgänglig:', lastError);
       } finally { pending = null; }
     })();
