@@ -53,6 +53,32 @@ test('push subscriptions reject arbitrary network destinations', async () => {
   await pool.end();
 });
 
+test('AirTag references are family scoped and contain no location', async () => {
+  const pool = new (newDb().adapters.createPg().Pool)();
+  const service = createFamilyService({ pool });
+  await service.init();
+  const owner = (await service.register({ email: 'item-owner@example.test', name: 'Owner', password: 'owner-long-password-123' })).user;
+  const member = (await service.register({ email: 'item-member@example.test', name: 'Member', password: 'member-long-password-123' })).user;
+  const outsider = (await service.register({ email: 'item-other@example.test', name: 'Other', password: 'other-long-password-123' })).user;
+  await service.createGroup(owner, 'Första familjen');
+  await service.createGroup(outsider, 'Andra familjen');
+  owner.family_id = (await pool.query('SELECT family_id FROM family_users WHERE id=$1',[owner.id])).rows[0].family_id;
+  outsider.family_id = (await pool.query('SELECT family_id FROM family_users WHERE id=$1',[outsider.id])).rows[0].family_id;
+  await service.join(member, await service.invite(owner));
+  member.family_id = owner.family_id;
+  await assert.rejects(service.addChildItem(member, { childName: 'Ella', itemName: 'Ryggsäck' }), { status: 403 });
+  await assert.rejects(service.addChildItem(owner, { childName: 'Ella', itemName: '' }), { status: 400 });
+  const id = await service.addChildItem(owner, { childName: 'Ella', itemName: 'Ellas ryggsäck' });
+  const item = (await service.overview(member)).childItems[0];
+  assert.deepEqual(item, { id, child_name: 'Ella', item_name: 'Ellas ryggsäck' });
+  assert.equal((await service.overview(outsider)).childItems.length, 0);
+  await service.removeChildItem(outsider, id);
+  assert.equal((await service.overview(owner)).childItems.length, 1);
+  await service.removeChildItem(owner, id);
+  assert.equal((await service.overview(member)).childItems.length, 0);
+  await pool.end();
+});
+
 test('native bearer sessions and family chat stay inside the family', async () => {
   const pool = new (newDb().adapters.createPg().Pool)();
   const service = createFamilyService({ pool });

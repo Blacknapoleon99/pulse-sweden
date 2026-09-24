@@ -48,7 +48,7 @@ function renderFamilyApp() {
     });
     return;
   }
-  const { user, family, members, zones, alerts } = info;
+  const { user, family, members, zones, alerts, childItems = [] } = info;
   const invitation = inviteFromHash();
   if (!family) {
     familyRoot.innerHTML = `${demoNote}<p>Inloggad som <strong>${safeText(user.display_name)}</strong>. Starta en familj eller använd en inbjudan.</p>
@@ -71,6 +71,10 @@ function renderFamilyApp() {
     <div class="family-consent"><h3>Polisens bedömda områden</h3><label class="family-area-toggle"><input id="family-police-area-alerts" type="checkbox" ${user.police_area_alerts ? 'checked' : ''}> Varna min familj när jag går in i ett område i Polisens lägesbild</label><p>Frivilligt per medlem. Gäller bara när din GPS-delning är aktiv, positionen är tillräckligt noggrann och den officiella områdesdatan har kunnat kontrolleras. Ingen varning skickas för ett område där du redan är när funktionen aktiveras. Bedömningen ${state.policeAreas?.year || 'från Polisen'} visar inte ett pågående brott eller var rekrytering sker just nu.</p></div>
     <div class="family-consent"><h3>Telefonaviseringar</h3><p>${familyUi.config.pushEnabled ? 'Aktivera push på varje telefon där du vill få familjens varningar.' : 'Push är inte konfigurerat på denna server.'}</p><button id="family-push" class="btn-secondary" ${familyUi.config.pushEnabled ? '' : 'disabled'}>🔔 Aktivera push</button><small>På iPhone: lägg först till TryggPuls på hemskärmen via webbläsarens Dela-meny och öppna appen därifrån.</small></div>
     <section><h3>Medlemmar</h3><div class="family-list">${members.map(member => `<div><strong>${safeText(member.display_name)}</strong> · ${member.sharing && member.updated_at ? 'Delade senast ' + safeText(formatSwedishTime(Date.parse(member.updated_at))) : 'Ingen aktuell platsdelning'}</div>`).join('')}</div></section>
+    <section><h3>Barn utan telefon · AirTag på tillhörighet</h3><p class="data-note">Parkoppla AirTagen i Hitta på en förälders Apple-enhet och spara sedan dess namn här. Att spara namnet parkopplar inte AirTagen. Barnet behöver ingen telefon eller uppkoppling, men AirTagens plats uppdateras bara när den upptäcks av Apples Hitta-nätverk. Föräldern behöver en Apple-enhet och internet för att se den. Öppna Hitta, välj Föremål och leta efter namnet nedan. TryggPuls får ingen AirTag-position och kan inte ge zon- eller nödlarm för den.</p>
+      ${isOwner ? familyForm('family-child-item-form','Lägg till AirTag-referens',`<label>Barnets namn<input name="childName" required maxlength="80" autocomplete="off"></label><label>AirTagens namn i Hitta<input name="itemName" required maxlength="80" autocomplete="off" placeholder="T.ex. Ellas ryggsäck"></label>`,'Spara referens') : ''}
+      <div class="family-list">${childItems.length ? childItems.map(item => `<div><strong>${safeText(item.child_name)}</strong> · ${safeText(item.item_name)} <small>Visa plats i Apples Hitta-app → Föremål. Ingen aktuell position i TryggPuls.</small>${isOwner ? `<button class="family-delete-child-item btn-secondary" data-id="${safeText(item.id)}" aria-label="Ta bort AirTag-referens för ${safeText(item.child_name)}">Ta bort</button>` : ''}</div>`).join('') : '<p>Inga AirTag-referenser sparade.</p>'}</div>
+      <p><a href="https://support.apple.com/en-gb/101602" target="_blank" rel="noopener">Så parkopplar du en AirTag ↗</a> · <a href="https://support.apple.com/guide/iphone/locate-an-item-ipha779f0c10/ios" target="_blank" rel="noopener">Så hittar du den i Hitta ↗</a></p><small>AirTag är gjord för föremål, inte för att spåra personer. Platsen kan vara fördröjd eller saknas helt.</small></section>
     ${isOwner ? `<section class="family-owner"><h3>Bjud in en medlem</h3><p>Engångslänk, giltig i 24 timmar. Den inbjudna personen skapar eller loggar in på sitt eget konto och väljer själv om GPS får delas.</p><button id="family-invite" class="btn-secondary">Skapa inbjudningslänk</button><div id="family-invite-result"></div></section>` : '<button id="family-leave" class="btn-secondary">Lämna familjen och stoppa platsdelning</button>'}
     <section><h3>Familjens zoner</h3><p class="data-note">En trygg plats larmar när en medlem lämnar den. En bevakad plats larmar vid inträde. Zoner är era egna val och är inte klassade av Polisen.</p>
       ${isOwner ? familyForm('family-zone-form','Lägg till zon',`<label>Namn<input name="name" required maxlength="80" placeholder="Hem, skola eller annan plats"></label><label>Plats<input id="family-zone-address" type="text" placeholder="Ange ort eller adress"></label><div id="family-zone-suggestions" class="suggestions-list" hidden></div><label>Typ<select name="kind"><option value="safe">Trygg plats · larm vid utträde</option><option value="watch">Bevakad plats · larm vid inträde</option></select></label><label>Radie<select name="radius"><option value="300">300 m</option><option value="500">500 m</option><option value="1000">1 000 m</option></select></label>`,'Spara zon') : ''}
@@ -94,7 +98,17 @@ function renderFamilyApp() {
   familyRoot.querySelectorAll('.family-delete-zone').forEach(button => button.addEventListener('click', async () => {
     try { await familyRequest('zones/' + encodeURIComponent(button.dataset.id),'DELETE'); await familyRefresh(); } catch (err) { familyError(err); }
   }));
+  familyRoot.querySelectorAll('.family-delete-child-item').forEach(button => button.addEventListener('click', async () => {
+    try { await familyRequest('child-items/' + encodeURIComponent(button.dataset.id),'DELETE'); await familyRefresh(); }
+    catch (err) { familyError(err); }
+  }));
   if (isOwner) {
+    familyRoot.querySelector('#family-child-item-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      try { await familyRequest('child-items','POST',Object.fromEntries(new FormData(form))); form.reset(); await familyRefresh(); }
+      catch (err) { familyError(err); }
+    });
     const input = familyRoot.querySelector('#family-zone-address');
     const suggestions = familyRoot.querySelector('#family-zone-suggestions');
     setupPlaceSearch(input,suggestions,point => { familyUi.point = point; });

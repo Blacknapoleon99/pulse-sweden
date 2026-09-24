@@ -7,7 +7,7 @@ TryggPuls visar publicerade myndighetsuppgifter, historisk statistik och öppna 
 
 ## Expo Go-prototyp
 
-En fristående mobil demo för Expo SDK 57 finns i [`mobile/`](mobile/README.md). Starta den med `cd mobile`, `npm ci` och `npm start`. Den använder de publika API:erna i webbservern och visar karta, polisnotiser och ruttanalys i ett native gränssnitt. Familjefunktioner och bakgrundsposition ingår inte i Expo Go-demon.
+En fristående mobil demo för Expo SDK 57 finns i [`mobile/`](mobile/README.md). Starta den med `cd mobile`, `npm ci` och `npm start`. Den använder webbserverns API:er och visar karta, polisnotiser, ruttanalys och familjefunktioner i ett native gränssnitt. Bakgrundsposition ingår inte i Expo Go-demon.
 
 ## API och drift (uppdaterat 2026-09-24)
 
@@ -39,7 +39,9 @@ Publika informationsendpoints stöder GET och HEAD. Informationsflöden anger `f
 | `/api/sources` | Källförteckning med observerad status, tidsstämpel och källänk |
 | `/api/health` | Serverns tillgänglighet (inte en garanti att alla externa källor svarar) |
 
-Familje-API: `GET /api/family/config`, `GET /api/family/me` och `POST /api/family/{register,login,logout,group,invite,join,zones,location,police-area-alerts,stop,leave,push}`. Zoner, push-prenumerationer och det egna kontot kan raderas med `DELETE`. Ändringar kräver JSON, `X-TryggPuls-Action: 1`, samma ursprung och, förutom registrering/inloggning, en httpOnly sessionscookie. Inbjudningar gäller en gång i 24 timmar. Endast familjens skapare kan ändra delade zoner. Varje medlem aktiverar själv GPS på sin enhet.
+Familje-API: `GET /api/family/config`, `GET /api/family/me` och `POST /api/family/{register,login,logout,group,invite,join,zones,child-items,location,police-area-alerts,stop,leave,push}`. Zoner, AirTag-referenser (`DELETE /api/family/child-items/{id}`), push-prenumerationer och det egna kontot kan raderas med `DELETE`. Ändringar kräver JSON, `X-TryggPuls-Action: 1`, samma ursprung och, förutom registrering/inloggning, en httpOnly sessionscookie eller en native bearer-session. Inbjudningar gäller en gång i 24 timmar. Endast familjens skapare kan ändra delade zoner och AirTag-referenser. Varje medlem aktiverar själv GPS på sin enhet.
+
+Familjen kan spara barnets namn och namnet på en AirTag som sitter på en tillhörighet. Det är en referens för att hitta föremålet i Apples Hitta-app, inte en AirTag-integration eller en position i TryggPuls. Barnet behöver inte en telefon eller internetanslutning, men platsen uppdateras bara när AirTagen upptäcks av [Apples Hitta-nätverk](https://support.apple.com/guide/iphone/locate-an-item-ipha779f0c10/ios). Apple avser AirTag för föremål, [inte för att spåra personer](https://www.apple.com/newsroom/2022/02/an-update-on-airtag-and-unwanted-tracking/). TryggPuls får ingen platsdata från AirTag och kan därför inte använda den för kartan, zonvarningar eller nödlarm. En GPS-enhet med egen uppkoppling och ett dokumenterat API skulle krävas för sådan automatisk funktion.
 
 Polisens 2025-GeoJSON för bedömda utsatta områden finns som reservkopia i `data/`. Servern kontrollerar [Polisens lägesbild och geodata](https://polisen.se/om-polisen/polisens-arbete/utsatta-omraden/) efter en ny officiell version, validerar arkivet och transformerar SWEREF 99 TM till WGS84. Varje familjemedlem kan frivilligt slå på inträdesvarningar för dessa områden. Första GPS-positionen skickar inget larm; varningar kräver högst 50 meters osäkerhet, färsk källkontroll och ett nytt inträde. Högst en varning per område och dag skickas. Detta är en periodisk områdesbedömning, inte en karta över pågående gängrekrytering eller brott. Tillfälliga säkerhetszoner har separata beslut, kartor och slutdatum. Något verifierat nationellt polygon-API för dem har inte hittats, så de visas inte som automatiska GPS-zoner.
 

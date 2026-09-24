@@ -47,6 +47,8 @@ export function FamilyScreen({
     [password, setPassword] = useState("");
   const [groupName, setGroupName] = useState(""),
     [inviteCode, setInviteCode] = useState("");
+  const [childName, setChildName] = useState(""),
+    [itemName, setItemName] = useState("");
   const [draft, setDraft] = useState("");
   const [zoneName, setZoneName] = useState(""),
     [zoneAddress, setZoneAddress] = useState("");
@@ -246,6 +248,57 @@ export function FamilyScreen({
                 <Text style={s.memberName}>{m.display_name}</Text>
               </View>
             ))}
+          </View>
+          <Text style={s.section}>Barn utan telefon · AirTag på tillhörighet</Text>
+          <View style={s.card}>
+            <Text style={s.description}>
+              Parkoppla AirTagen i Hitta på en förälders Apple-enhet och spara
+              sedan dess namn här. Att spara namnet parkopplar inte AirTagen.
+              Barnet behöver ingen telefon eller uppkoppling. Platsen uppdateras
+              bara när Apples Hitta-nätverk upptäcker AirTagen. Föräldern behöver
+              en Apple-enhet och internet för att se den. TryggPuls får ingen
+              AirTag-position och kan inte ge zon- eller nödlarm för den.
+            </Text>
+            {(overview.childItems || []).map((item) => (
+              <View key={item.id} style={s.item}>
+                <Text style={s.title}>{item.child_name}</Text>
+                <Text style={s.description}>{item.item_name} · Visa i Hitta → Föremål</Text>
+                {overview.family?.owner_id === overview.user.id && (
+                  <Button
+                    label="Ta bort referens"
+                    secondary
+                    disabled={busy}
+                    onPress={() => action(() => familyRequest(`child-items/${encodeURIComponent(item.id)}`, "DELETE"))}
+                  />
+                )}
+              </View>
+            ))}
+            {overview.family.owner_id === overview.user.id && (
+              <>
+                <TextInput style={s.input} placeholder="Barnets namn" value={childName} onChangeText={setChildName} maxLength={80} />
+                <TextInput style={s.input} placeholder="AirTagens namn i Hitta" value={itemName} onChangeText={setItemName} maxLength={80} />
+                <Button
+                  label="Spara AirTag-referens"
+                  disabled={busy}
+                  onPress={() => action(async () => {
+                    await familyRequest("child-items", "POST", { childName, itemName });
+                    setChildName("");
+                    setItemName("");
+                  })}
+                />
+              </>
+            )}
+            <Button
+              label="Så parkopplar du AirTag"
+              secondary
+              onPress={() => openSource("https://support.apple.com/en-gb/101602")}
+            />
+            <Button
+              label="Så hittar du AirTag i Hitta"
+              secondary
+              onPress={() => openSource("https://support.apple.com/guide/iphone/locate-an-item-ipha779f0c10/ios")}
+            />
+            <Text style={s.note}>AirTag är gjord för föremål, inte för att spåra personer. Platsen kan vara fördröjd eller saknas.</Text>
           </View>
           <Text style={s.section}>Familjens karta</Text>
           <View style={s.mapCard}>
