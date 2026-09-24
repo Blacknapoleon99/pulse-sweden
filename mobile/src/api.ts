@@ -119,6 +119,11 @@ export type FamilyOverview = {
     accuracy?: number;
     updated_at?: string;
   }[];
+  childItems: {
+    id: string;
+    child_name: string;
+    item_name: string;
+  }[];
   zones: {
     id: string;
     name: string;

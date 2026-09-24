@@ -53,6 +53,7 @@ export function createFamilyApi(options = {}) {
         if (url.pathname === '/api/family/invite') return reply(req,res,200,{token:await service.invite(user)});
         if (url.pathname === '/api/family/join') { await service.join(user,data.token); return reply(req,res,200,{ok:true}); }
         if (url.pathname === '/api/family/zones') return reply(req,res,200,{id:await service.addZone(user,data)});
+        if (url.pathname === '/api/family/child-items') return reply(req,res,200,{id:await service.addChildItem(user,data)});
         if (url.pathname === '/api/family/police-area-alerts') { await service.setPoliceAreaAlerts(user,data.enabled); return reply(req,res,200,{enabled:data.enabled}); }
         if (url.pathname === '/api/family/location') {
           const events = await getEvents();
@@ -66,6 +67,7 @@ export function createFamilyApi(options = {}) {
       if (req.method === 'DELETE') {
         const data = await body(req);
         if (url.pathname.startsWith('/api/family/zones/')) { await service.removeZone(user,url.pathname.slice('/api/family/zones/'.length)); return reply(req,res,200,{ok:true}); }
+        if (url.pathname.startsWith('/api/family/child-items/')) { await service.removeChildItem(user,url.pathname.slice('/api/family/child-items/'.length)); return reply(req,res,200,{ok:true}); }
         if (url.pathname === '/api/family/push') { await service.unsubscribe(user,data.endpoint); return reply(req,res,200,{ok:true}); }
         if (url.pathname === '/api/family/account') { await service.deleteAccount(user); return reply(req,res,200,{ok:true},service.cookie('',process.env.NODE_ENV==='production')); }
       }

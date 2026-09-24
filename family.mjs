@@ -38,6 +38,7 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     await query(`CREATE TABLE IF NOT EXISTS family_push (endpoint text PRIMARY KEY, user_id text NOT NULL, subscription jsonb NOT NULL)`);
     await query(`CREATE TABLE IF NOT EXISTS family_messages (id text PRIMARY KEY, family_id text NOT NULL, sender_id text NOT NULL, body text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`);
     await query('CREATE INDEX IF NOT EXISTS family_messages_family_time ON family_messages(family_id,created_at DESC)');
+    await query(`CREATE TABLE IF NOT EXISTS family_child_items (id text PRIMARY KEY, family_id text NOT NULL, child_name text NOT NULL, item_name text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`);
   }
   function sessionToken(req) {
     const bearer = /^Bearer ([A-Za-z0-9_-]{20,100})$/.exec(req.headers.authorization || '')?.[1];
@@ -77,13 +78,14 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     if (value) await query(`DELETE FROM family_sessions WHERE token_hash=$1`, [hash(value)]);
   }
   async function overview(user) {
-    if (!user.family_id) return { user, family: null, members: [], zones: [], alerts: [] };
+    if (!user.family_id) return { user, family: null, members: [], zones: [], alerts: [], childItems: [] };
     const family = (await query('SELECT id,name,owner_id FROM family_groups WHERE id=$1',[user.family_id])).rows[0] || null;
-    if (!family) return { user, family: null, members: [], zones: [], alerts: [] };
+    if (!family) return { user, family: null, members: [], zones: [], alerts: [], childItems: [] };
     const members = (await query(`SELECT u.id,u.display_name,u.sharing,p.lat,p.lon,p.updated_at,p.accuracy FROM family_users u LEFT JOIN family_positions p ON p.user_id=u.id AND u.sharing=true AND p.updated_at>now()-interval '15 minutes' WHERE u.family_id=$1 ORDER BY u.display_name`,[family.id])).rows;
     const zones = (await query('SELECT id,name,kind,lat,lon,radius FROM family_zones WHERE family_id=$1 ORDER BY name',[family.id])).rows;
     const alerts = (await query(`SELECT id,subject_id,kind,title,detail,source_url,created_at FROM family_alerts WHERE family_id=$1 AND created_at>now()-interval '7 days' ORDER BY created_at DESC LIMIT 50`,[family.id])).rows;
-    return { user, family, members, zones, alerts };
+    const childItems = (await query('SELECT id,child_name,item_name FROM family_child_items WHERE family_id=$1 ORDER BY child_name',[family.id])).rows;
+    return { user, family, members, zones, alerts, childItems };
   }
   async function listMessages(user) {
     if (!user.family_id) throw Object.assign(new Error('Gå med i en familj först'), { status: 409 });
@@ -137,6 +139,19 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     const removed = (await query('DELETE FROM family_zones WHERE id=$1 AND family_id=$2 RETURNING id',[id,family.id])).rows[0];
     if (removed) await query('DELETE FROM family_zone_state WHERE zone_id=$1',[id]);
   }
+  async function addChildItem(user, body) {
+    const family = await requireOwner(user);
+    const childName = cleanName(body?.childName);
+    const itemName = cleanName(body?.itemName);
+    if (!childName || !itemName) throw Object.assign(new Error('Ange barnets namn och AirTag-namnet i Hitta'), { status: 400 });
+    const id = randomUUID();
+    await query('INSERT INTO family_child_items(id,family_id,child_name,item_name) VALUES($1,$2,$3,$4)',[id,family.id,childName,itemName]);
+    return id;
+  }
+  async function removeChildItem(user, id) {
+    const family = await requireOwner(user);
+    await query('DELETE FROM family_child_items WHERE id=$1 AND family_id=$2',[id,family.id]);
+  }
   async function leave(user) {
     if (!user.family_id) return;
     const family = (await query('SELECT owner_id FROM family_groups WHERE id=$1',[user.family_id])).rows[0];
@@ -165,6 +180,7 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
         await query('DELETE FROM family_zones WHERE family_id=$1',[user.family_id]);
         await query('DELETE FROM family_alerts WHERE family_id=$1',[user.family_id]);
         await query('DELETE FROM family_messages WHERE family_id=$1',[user.family_id]);
+        await query('DELETE FROM family_child_items WHERE family_id=$1',[user.family_id]);
         await query('DELETE FROM family_groups WHERE id=$1',[user.family_id]);
       }
     }
@@ -268,5 +284,5 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     await query('INSERT INTO family_push(endpoint,user_id,subscription) VALUES($1,$2,$3) ON CONFLICT(endpoint) DO UPDATE SET user_id=EXCLUDED.user_id,subscription=EXCLUDED.subscription',[subscription.endpoint,user.id,subscription]);
   }
   async function unsubscribe(user, endpoint) { await query('DELETE FROM family_push WHERE user_id=$1 AND endpoint=$2',[user.id,endpoint]); }
-  return { available, pushEnabled, vapidPublic: pushEnabled ? vapidPublic : null, init, session, register, login, logout, overview, listMessages, sendMessage, createGroup, invite, join, addZone, removeZone, leave, stop, setPoliceAreaAlerts, deleteAccount, reportLocation, sweep, subscribe, unsubscribe, cookie };
+  return { available, pushEnabled, vapidPublic: pushEnabled ? vapidPublic : null, init, session, register, login, logout, overview, listMessages, sendMessage, createGroup, invite, join, addZone, removeZone, addChildItem, removeChildItem, leave, stop, setPoliceAreaAlerts, deleteAccount, reportLocation, sweep, subscribe, unsubscribe, cookie };
 }
