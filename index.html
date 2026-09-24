@@ -17,7 +17,7 @@
 
   <!-- Leaflet JS -->
   <script src="/vendor/leaflet/leaflet.js" defer></script>
-  <script type="module" src="/app.js?v=7"></script>
+  <script type="module" src="/app.js?v=8"></script>
   <script src="/family-client.js?v=1" defer></script>
 </head>
 <body>
@@ -479,12 +479,12 @@
         </div>
 
         <div class="map-quick-actions">
+          <button id="btn-reset-map" class="btn-map-control" type="button" aria-label="Visa hela Sverige" title="Visa hela Sverige">🇸🇪 Hela Sverige</button>
           <button id="btn-my-location" class="btn-map-control" title="Hitta min position">📍 Min position</button>
           <details id="map-layers-panel" class="map-layer-panel">
             <summary class="btn-map-control">▧ Kartlager</summary>
             <div class="map-layer-options" role="group" aria-label="Kartlager och kartvy">
               <button id="btn-police-areas" class="btn-map-control" type="button" aria-pressed="true">Polisens områdesbedömningar</button>
-              <button id="btn-reset-map" class="btn-map-control" type="button">Återställ kartvy · hela Sverige</button>
             </div>
           </details>
         </div>

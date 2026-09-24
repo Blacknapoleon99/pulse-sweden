@@ -14,6 +14,7 @@ test('HTTP routing, input validation, health, HEAD and private files', async () 
     assert.match(homeHtml, /panel-information/);
     assert.match(homeHtml, /data-tab="nara"/);
     assert.match(homeHtml, /map-layers-panel/);
+    assert.match(homeHtml, /class="map-quick-actions"[\s\S]*?<button id="btn-reset-map"[^>]*>🇸🇪 Hela Sverige<\/button>/);
     assert.match(homeHtml, /route-security-zones-list/);
     const css = await fetch(base + '/vendor/leaflet/leaflet.css');
     assert.equal(css.status, 200);
@@ -21,7 +22,7 @@ test('HTTP routing, input validation, health, HEAD and private files', async () 
     assert.equal((await fetch(base + '/family-client.js')).status, 200);
     assert.equal((await fetch(base + '/route-follow.js')).status, 200);
     assert.match(await (await fetch(base + '/route-follow.js')).text(), /createRouteFollowController/);
-    const clientBundle = await fetch(base + '/app.js?v=7');
+    const clientBundle = await fetch(base + '/app.js?v=8');
     assert.equal(clientBundle.status, 200);
     assert.doesNotMatch(await clientBundle.text(), /TRAFIKVERKET_API_KEY|ZONE_ADMIN_TOKEN/);
     assert.equal((await fetch(base + '/family-sw.js')).status, 200);
