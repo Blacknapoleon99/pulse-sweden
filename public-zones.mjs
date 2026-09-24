@@ -20,14 +20,27 @@ function officialSource(value) {
   return url.href;
 }
 
-function coordinateCount(node, count = { value: 0 }) {
-  if (Array.isArray(node) && node.length >= 2 && typeof node[0] === 'number' && typeof node[1] === 'number') {
-    const [lon, lat] = node;
-    if (!Number.isFinite(lon) || !Number.isFinite(lat) || lon < 10 || lon > 25 || lat < 54 || lat > 71) throw Object.assign(new Error('Zonens koordinater måste ligga i Sverige'), { status: 400 });
-    count.value++;
-  } else if (Array.isArray(node)) for (const child of node) coordinateCount(child, count);
-  else throw Object.assign(new Error('GeoJSON innehåller en ogiltig koordinatstruktur'), { status: 400 });
-  return count.value;
+function coordinateCount(geometry) {
+  const validateRing = ring => {
+    if (!Array.isArray(ring) || ring.length < 4) throw Object.assign(new Error('Varje polygonring måste ha minst fyra positioner'), { status: 400 });
+    for (const position of ring) {
+      if (!Array.isArray(position) || position.length < 2 || position.length > 3 || position.some(value => !Number.isFinite(value))) throw Object.assign(new Error('GeoJSON innehåller en ogiltig koordinatstruktur'), { status: 400 });
+      const [lon, lat] = position;
+      if (lon < 10 || lon > 25 || lat < 54 || lat > 71) throw Object.assign(new Error('Zonens koordinater måste ligga i Sverige'), { status: 400 });
+    }
+    const first = ring[0], last = ring.at(-1);
+    if (first.length !== last.length || first.some((value, index) => value !== last[index])) throw Object.assign(new Error('Varje polygonring måste vara sluten enligt GeoJSON'), { status: 400 });
+    return ring.length;
+  };
+  const validatePolygon = polygon => {
+    if (!Array.isArray(polygon) || polygon.length === 0) throw Object.assign(new Error('Varje polygon måste ha en yttre ring'), { status: 400 });
+    return polygon.reduce((total, ring) => total + validateRing(ring), 0);
+  };
+  if (geometry?.type === 'Polygon') return validatePolygon(geometry.coordinates);
+  if (geometry?.type === 'MultiPolygon' && Array.isArray(geometry.coordinates) && geometry.coordinates.length > 0) {
+    return geometry.coordinates.reduce((total, polygon) => total + validatePolygon(polygon), 0);
+  }
+  throw Object.assign(new Error('GeoJSON innehåller en ogiltig koordinatstruktur'), { status: 400 });
 }
 
 export function validatePublicZone(input, { now = Date.now } = {}) {
@@ -39,7 +52,7 @@ export function validatePublicZone(input, { now = Date.now } = {}) {
   const sourceUrl = officialSource(input.sourceUrl);
   const geometry = input.geometry?.type ? input.geometry : input.geometry?.geometry;
   if (!geometry || !['Polygon', 'MultiPolygon'].includes(geometry.type)) throw Object.assign(new Error('Ange en GeoJSON-polygon eller multipolygon'), { status: 400 });
-  const coordinateTotal = coordinateCount(geometry.coordinates);
+  const coordinateTotal = coordinateCount(geometry);
   if (coordinateTotal < 4 || coordinateTotal > 20_000) throw Object.assign(new Error('Polygonen måste ha 4–20 000 koordinater'), { status: 400 });
   const sourceDate = asIsoDate(input.sourceDate);
   const validFrom = asIsoDate(input.validFrom || new Date(now()).toISOString());

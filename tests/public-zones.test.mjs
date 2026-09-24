@@ -12,6 +12,8 @@ test('publicerade zoner kräver myndighetskälla, datum och polygon i Sverige', 
   assert.equal(validatePublicZone(validZone).kind, 'security-zone');
   assert.throws(() => validatePublicZone({ ...validZone, sourceUrl: 'https://polisen.se.example.com/fake' }), /officiell svensk myndighet/);
   assert.throws(() => validatePublicZone({ ...validZone, geometry: { type: 'Polygon', coordinates: [[[30, 80], [30.1, 80], [30.1, 80.1], [30, 80.1], [30, 80]]] } }), /Sverige/);
+  assert.throws(() => validatePublicZone({ ...validZone, geometry: { type: 'Polygon', coordinates: [[[18, 59], [18.01, 59], [18.01, 59.01], [18, 59.01]]] } }), /sluten enligt GeoJSON/);
+  assert.throws(() => validatePublicZone({ ...validZone, geometry: { type: 'MultiPolygon', coordinates: [[], polygon.coordinates] } }), /yttre ring/);
   assert.throws(() => validatePublicZone({ ...validZone, validTo: '2020-01-01T00:00:00Z' }), /efter giltig från/);
   assert.throws(() => validatePublicZone({ ...validZone, validTo: null }), /sista giltighetsdag eller nästa granskningsdag/);
   assert.throws(() => validatePublicZone({ ...validZone, validTo: '2025-01-16T00:00:00Z' }), /högst 14 dagar/);
@@ -37,9 +39,9 @@ test('zoner blir publika först efter gransknings- och publiceringssteg', async 
   await service.init();
   const originalToken = process.env.ZONE_ADMIN_TOKEN;
   process.env.ZONE_ADMIN_TOKEN = 'test-only-token';
-  const send = async (path, method, body) => {
+  const send = async (path, method, body, authorizationToken = 'test-only-token') => {
     const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]);
-    req.headers = { host: 'tryggpuls.test', authorization: 'Bearer test-only-token', ...(body === undefined ? {} : { 'content-type': 'application/json', 'x-tryggpuls-action': '1' }) };
+    req.headers = { host: 'tryggpuls.test', authorization: `Bearer ${authorizationToken}`, ...(body === undefined ? {} : { 'content-type': 'application/json', 'x-tryggpuls-action': '1' }) };
     req.method = method;
     let status, text = '';
     const res = { writeHead(code) { status = code; }, end(value) { text = value || ''; } };
@@ -57,6 +59,7 @@ test('zoner blir publika först efter gransknings- och publiceringssteg', async 
   };
   try {
     assert.equal((await sendWithoutToken()).status, 401);
+    assert.equal((await send('/api/admin/zones', 'GET', undefined, 'family-session-token')).status, 401, 'family sessions do not grant admin zone access');
     const draft = await send('/api/admin/zones', 'POST', validZone);
     assert.equal(draft.status, 201);
     assert.equal((await send('/api/public-zones', 'GET')).data.features.length, 0);
@@ -67,6 +70,8 @@ test('zoner blir publika först efter gransknings- och publiceringssteg', async 
     assert.equal(result.data.features.length, 1);
     assert.equal(result.data.features[0].properties.name, 'Testzon');
     assert.equal(result.data.features[0].properties.sourceExcerpt, validZone.sourceExcerpt);
+    const actions = (await pool.query('SELECT action FROM public_zone_audit WHERE zone_id=$1', [draft.data.id])).rows.map(row => row.action);
+    assert.deepEqual(new Set(actions), new Set(['draft-created', 'review', 'published']));
 
     now = Date.parse(validZone.validTo) + 1;
     assert.equal((await send('/api/public-zones', 'GET')).data.features.length, 0);
@@ -75,6 +80,8 @@ test('zoner blir publika först efter gransknings- och publiceringssteg', async 
     const audit = await pool.query("SELECT action,actor FROM public_zone_audit WHERE zone_id=$1 AND action='auto-ended-expired'", [draft.data.id]);
     assert.equal(audit.rows.length, 1);
     assert.equal(audit.rows[0].actor, 'system');
+    const finalActions = (await pool.query('SELECT action FROM public_zone_audit WHERE zone_id=$1', [draft.data.id])).rows.map(row => row.action);
+    assert.ok(finalActions.includes('auto-ended-expired'));
   } finally {
     if (originalToken === undefined) delete process.env.ZONE_ADMIN_TOKEN;
     else process.env.ZONE_ADMIN_TOKEN = originalToken;

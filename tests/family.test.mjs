@@ -25,6 +25,9 @@ test('family accounts, consent, zones and one-use invitations', async () => {
   const moved = await service.reportLocation(child, { lat: 59.34, lon: 18.06, accuracy: 15 });
   assert.equal(moved.alerts, 1);
   assert.equal((await service.overview(owner)).alerts.length, 1);
+  const repeated = await service.reportLocation(child, { lat: 59.34, lon: 18.06, accuracy: 15 });
+  assert.equal(repeated.alerts, 0);
+  assert.equal((await service.overview(owner)).alerts.length, 1, 'repeated location reports must not send a duplicate zone alert');
   await service.stop(child);
   const stopped = await service.overview(owner);
   assert.equal(stopped.members.find(member => member.id === child.id).sharing, false);

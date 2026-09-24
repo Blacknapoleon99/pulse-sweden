@@ -81,3 +81,26 @@ test('GPS permission denial stops watching and prevents timed source refreshes',
   assert.equal(fake.intervals.size, 0);
   assert.deepEqual(stateChanges, [[true, 'start'], [false, 'permission-denied']]);
 });
+
+test('temporary GPS loss keeps route follow active and accepts a later position', () => {
+  const fake = fakeLocation();
+  let positions = 0, refreshes = 0;
+  const controller = createRouteFollowController({
+    geolocation: fake.geolocation,
+    onPosition: () => positions++, onRefresh: () => refreshes++,
+    setIntervalFn: fake.setIntervalFn, clearIntervalFn: fake.clearIntervalFn
+  });
+  controller.start();
+  const watch = fake.watches.get(1);
+  watch.error({ code: 2, message: 'temporarily unavailable' });
+  assert.equal(controller.active, true);
+  assert.equal(controller.watching, true);
+  assert.equal(controller.refreshing, true);
+  watch.success({ coords: { latitude: 59, longitude: 18 }, timestamp: 2 });
+  assert.equal(positions, 1);
+  fake.intervals.values().next().value.callback();
+  assert.equal(refreshes, 1, 'source refresh remains available during a temporary GPS outage');
+  controller.stop();
+  assert.equal(fake.watches.size, 0);
+  assert.equal(fake.intervals.size, 0);
+});
