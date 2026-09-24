@@ -181,8 +181,9 @@ export function StatsScreen({
         <>
           <Text style={s.title}>Vanliga typer i hämtade polisnotiser</Text>
           <Text style={s.note}>
-            Det här är antal publicerade notiser nära kartans mitt eller din
-            plats, inte statistik över alla begångna brott.
+            Det här är typer bland de senast hämtade polisnotiserna inom cirka
+            35 km från kartans mitt eller din plats, inte statistik över alla
+            begångna brott.
           </Text>
           {counts.length ? (
             counts.map(([name, count]) => (

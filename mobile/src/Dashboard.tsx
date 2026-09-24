@@ -38,6 +38,7 @@ type Props = {
   events: EventsResponse | null;
   areas: Feature[];
   nearby: Event[];
+  statsEvents: Event[];
   weather: FeedResponse | null;
   crisis: CrisisResponse | null;
   news: FeedResponse | null;
@@ -190,6 +191,7 @@ export function Dashboard(props: Props) {
     events,
     areas,
     nearby,
+    statsEvents,
     weather,
     crisis,
     news,
@@ -519,7 +521,7 @@ export function Dashboard(props: Props) {
               />
             )}
             {screen === "stats" && (
-              <StatsScreen nearby={nearby} areas={areas} />
+              <StatsScreen nearby={statsEvents} areas={areas} />
             )}
             {screen === "info" && (
               <>

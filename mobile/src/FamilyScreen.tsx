@@ -115,7 +115,11 @@ export function FamilyScreen({
   const shownEvents = familyEvents.filter(
     (e) =>
       eventFilter === "Alla" ||
-      e.type.toLowerCase().includes(eventFilter.toLowerCase()),
+      (eventFilter === "Bilstöld"
+        ? /(?:stöld.{0,30}(?:bil|fordon)|(?:bil|fordon).{0,30}stöld)/i.test(
+            `${e.type} ${e.summary}`,
+          )
+        : e.type.toLowerCase().includes(eventFilter.toLowerCase())),
   );
   return (
     <View>

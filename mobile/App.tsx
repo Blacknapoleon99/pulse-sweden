@@ -262,13 +262,13 @@ function AppScreen() {
   const around = position
     ? { latitude: position.lat, longitude: position.lon }
     : center;
-  const nearby = (events?.events || [])
+  const nearbyAll = (events?.events || [])
     .filter((event) => {
       const p = eventPoint(event);
       return p && km(around, p) < 35;
     })
-    .sort((a, b) => b.ts - a.ts)
-    .slice(0, 12);
+    .sort((a, b) => b.ts - a.ts);
+  const nearby = nearbyAll.slice(0, 12);
   const visibleAreas = [...(areas?.features || []), ...(zones?.features || [])]
     .filter((f) => {
       const first = polygonRings(f)[0]?.[0];
@@ -358,6 +358,7 @@ function AppScreen() {
           events={events}
           areas={visibleAreas}
           nearby={nearby}
+          statsEvents={nearbyAll}
           weather={weather}
           crisis={crisis}
           news={news}
