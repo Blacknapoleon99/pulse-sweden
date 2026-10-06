@@ -24,6 +24,8 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
   const pushEnabled = Boolean(vapidPublic && vapidPrivate);
   if (pushEnabled) push.setVapidDetails('mailto:contact@tryggpuls.se', vapidPublic, vapidPrivate);
   const query = (sql, args = []) => pool.query(sql, args);
+  const accountCleanupHooks = [];
+  const alarmHooks = [];
   async function init() {
     if (!pool) return;
     await query(`CREATE TABLE IF NOT EXISTS family_users (id text PRIMARY KEY, email text UNIQUE NOT NULL, display_name text NOT NULL, salt text NOT NULL, password_hash text NOT NULL, family_id text, sharing boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now())`);
@@ -33,11 +35,20 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     await query(`CREATE TABLE IF NOT EXISTS family_invites (token_hash text PRIMARY KEY, family_id text NOT NULL, expires_at timestamptz NOT NULL, used boolean NOT NULL DEFAULT false)`);
     await query(`CREATE TABLE IF NOT EXISTS family_zones (id text PRIMARY KEY, family_id text NOT NULL, name text NOT NULL, kind text NOT NULL, lat double precision NOT NULL, lon double precision NOT NULL, radius integer NOT NULL)`);
     await query(`CREATE TABLE IF NOT EXISTS family_positions (user_id text PRIMARY KEY, lat double precision NOT NULL, lon double precision NOT NULL, accuracy double precision NOT NULL, updated_at timestamptz NOT NULL)`);
+    await query(`CREATE TABLE IF NOT EXISTS family_position_history (id text PRIMARY KEY, family_id text NOT NULL, user_id text NOT NULL, lat double precision NOT NULL, lon double precision NOT NULL, accuracy double precision NOT NULL, recorded_at timestamptz NOT NULL DEFAULT now())`);
     await query(`CREATE TABLE IF NOT EXISTS family_zone_state (user_id text NOT NULL, zone_id text NOT NULL, inside boolean NOT NULL, PRIMARY KEY(user_id,zone_id))`);
     await query(`CREATE TABLE IF NOT EXISTS family_alerts (id text PRIMARY KEY, family_id text NOT NULL, subject_id text NOT NULL, alert_key text NOT NULL UNIQUE, kind text NOT NULL, title text NOT NULL, detail text NOT NULL, source_url text, created_at timestamptz NOT NULL DEFAULT now())`);
     await query(`CREATE TABLE IF NOT EXISTS family_push (endpoint text PRIMARY KEY, user_id text NOT NULL, subscription jsonb NOT NULL)`);
     await query(`CREATE TABLE IF NOT EXISTS family_messages (id text PRIMARY KEY, family_id text NOT NULL, sender_id text NOT NULL, body text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`);
+    await query('ALTER TABLE family_messages ADD COLUMN IF NOT EXISTS recipient_id text');
     await query('CREATE INDEX IF NOT EXISTS family_messages_family_time ON family_messages(family_id,created_at DESC)');
+    await query('CREATE INDEX IF NOT EXISTS family_position_history_family_time ON family_position_history(family_id,recorded_at)');
+    await query('CREATE INDEX IF NOT EXISTS family_position_history_user_time ON family_position_history(user_id,recorded_at DESC)');
+    await query('CREATE INDEX IF NOT EXISTS family_messages_private_time ON family_messages(family_id,sender_id,recipient_id,created_at DESC)');
+    await query(`CREATE TABLE IF NOT EXISTS family_alarms (id text PRIMARY KEY, family_id text NOT NULL, sender_id text NOT NULL, request_id text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz NOT NULL, cancelled_at timestamptz, UNIQUE(sender_id,request_id))`);
+    await query(`CREATE TABLE IF NOT EXISTS family_alarm_recipients (alarm_id text NOT NULL, user_id text NOT NULL, acknowledged_at timestamptz, PRIMARY KEY(alarm_id,user_id))`);
+    await query('CREATE INDEX IF NOT EXISTS family_alarms_family_time ON family_alarms(family_id,created_at DESC)');
+    await query(`CREATE TABLE IF NOT EXISTS family_child_items (id text PRIMARY KEY, family_id text NOT NULL, child_name text NOT NULL, item_name text NOT NULL, created_at timestamptz NOT NULL DEFAULT now())`);
   }
   function sessionToken(req) {
     const bearer = /^Bearer ([A-Za-z0-9_-]{20,100})$/.exec(req.headers.authorization || '')?.[1];
@@ -66,10 +77,11 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     return { user: { id, email, display_name: name, family_id: null, sharing: false }, token: await signIn({ id }) };
   }
   async function login(body) {
+    if (typeof body?.password !== 'string' || body.password.length > 200) throw Object.assign(new Error('Fel e-post eller lösenord'), { status: 401 });
     const email = String(body.email || '').trim().toLowerCase();
     const user = (await query(`SELECT * FROM family_users WHERE email=$1`, [email])).rows[0];
     const digest = await scrypt(String(body.password || ''), user?.salt || '00000000000000000000000000000000', 64);
-    if (!user || !timingSafeEqual(digest, Buffer.from(user.password_hash, 'hex'))) throw Object.assign(new Error('Fel e-post eller lösenord'), { status: 401 });
+    if (!user?.salt || !user?.password_hash || !timingSafeEqual(digest, Buffer.from(user.password_hash, 'hex'))) throw Object.assign(new Error('Fel e-post eller lösenord'), { status: 401 });
     return { user: { id: user.id, email: user.email, display_name: user.display_name, family_id: user.family_id, sharing: user.sharing, police_area_alerts: user.police_area_alerts }, token: await signIn(user) };
   }
   async function logout(req) {
@@ -77,26 +89,92 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     if (value) await query(`DELETE FROM family_sessions WHERE token_hash=$1`, [hash(value)]);
   }
   async function overview(user) {
-    if (!user.family_id) return { user, family: null, members: [], zones: [], alerts: [] };
+    if (!user.family_id) return { user, family: null, members: [], zones: [], alerts: [], childItems: [] };
     const family = (await query('SELECT id,name,owner_id FROM family_groups WHERE id=$1',[user.family_id])).rows[0] || null;
-    if (!family) return { user, family: null, members: [], zones: [], alerts: [] };
+    if (!family) return { user, family: null, members: [], zones: [], alerts: [], childItems: [] };
     const members = (await query(`SELECT u.id,u.display_name,u.sharing,p.lat,p.lon,p.updated_at,p.accuracy FROM family_users u LEFT JOIN family_positions p ON p.user_id=u.id AND u.sharing=true AND p.updated_at>now()-interval '15 minutes' WHERE u.family_id=$1 ORDER BY u.display_name`,[family.id])).rows;
     const zones = (await query('SELECT id,name,kind,lat,lon,radius FROM family_zones WHERE family_id=$1 ORDER BY name',[family.id])).rows;
     const alerts = (await query(`SELECT id,subject_id,kind,title,detail,source_url,created_at FROM family_alerts WHERE family_id=$1 AND created_at>now()-interval '7 days' ORDER BY created_at DESC LIMIT 50`,[family.id])).rows;
-    return { user, family, members, zones, alerts };
+    const childItems = (await query('SELECT id,child_name,item_name FROM family_child_items WHERE family_id=$1 ORDER BY child_name',[family.id])).rows;
+    const history = (await query(`SELECT h.user_id,h.lat,h.lon,h.recorded_at FROM family_position_history h JOIN family_users u ON u.id=h.user_id WHERE h.family_id=$1 AND u.family_id=$1 AND u.sharing=true AND h.recorded_at>now()-interval '6 hours' ORDER BY h.recorded_at`,[family.id])).rows;
+    const positionHistory = {};
+    for (const point of history) (positionHistory[point.user_id] ||= []).push({latitude:point.lat,longitude:point.lon,at:new Date(point.recorded_at).getTime()});
+    return { user, family, members, zones, alerts, childItems, positionHistory,privateChatEnabled:true };
   }
-  async function listMessages(user) {
+  async function chatRecipient(user,recipientId) {
+    if(typeof recipientId!=='string'||recipientId===user.id)throw Object.assign(new Error('Välj en annan familjemedlem'),{status:400});
+    const recipient=(await query('SELECT id FROM family_users WHERE id=$1 AND family_id=$2',[recipientId,user.family_id])).rows[0];
+    if(!recipient)throw Object.assign(new Error('Mottagaren finns inte i din familj'),{status:403});
+    return recipient.id;
+  }
+  async function listMessages(user,recipientId=null) {
     if (!user.family_id) throw Object.assign(new Error('Gå med i en familj först'), { status: 409 });
-    const rows = (await query(`SELECT m.id,m.sender_id,u.display_name AS sender_name,m.body,m.created_at FROM family_messages m JOIN family_users u ON u.id=m.sender_id WHERE m.family_id=$1 ORDER BY m.created_at DESC LIMIT 50`, [user.family_id])).rows;
+    if(recipientId!==null)await chatRecipient(user,recipientId);
+    const rows = (await query(`SELECT m.id,m.sender_id,m.recipient_id,u.display_name AS sender_name,m.body,m.created_at FROM family_messages m JOIN family_users u ON u.id=m.sender_id WHERE m.family_id=$1 AND ${recipientId===null?'m.recipient_id IS NULL':'((m.sender_id=$2 AND m.recipient_id=$3) OR (m.sender_id=$3 AND m.recipient_id=$2))'} ORDER BY m.created_at DESC LIMIT 50`, recipientId===null?[user.family_id]:[user.family_id,user.id,recipientId])).rows;
     return rows.reverse();
   }
-  async function sendMessage(user, value) {
+  async function sendMessage(user, value, recipientId=null) {
     if (!user.family_id) throw Object.assign(new Error('Gå med i en familj först'), { status: 409 });
     const body = typeof value === 'string' ? value.trim() : '';
     if (!body || body.length > 500) throw Object.assign(new Error('Skriv 1–500 tecken'), { status: 400 });
+    if(recipientId!==null)await chatRecipient(user,recipientId);
     const id = randomUUID();
-    await query('INSERT INTO family_messages(id,family_id,sender_id,body) VALUES($1,$2,$3,$4)', [id,user.family_id,user.id,body]);
+    await query('INSERT INTO family_messages(id,family_id,sender_id,body,recipient_id) VALUES($1,$2,$3,$4,$5)', [id,user.family_id,user.id,body,recipientId]);
     return { id };
+  }
+  async function listAlarms(user) {
+    if (!user.family_id) return [];
+    const alarms = (await query(`SELECT a.id,a.family_id,a.sender_id,u.display_name AS sender_name,a.created_at,a.expires_at,a.cancelled_at FROM family_alarms a JOIN family_users u ON u.id=a.sender_id WHERE a.family_id=$1 AND a.created_at>now()-interval '7 days' ORDER BY a.created_at DESC LIMIT 50`,[user.family_id])).rows;
+    const recipients = (await query(`SELECT r.alarm_id,r.user_id,u.display_name,r.acknowledged_at FROM family_alarm_recipients r JOIN family_users u ON u.id=r.user_id JOIN family_alarms a ON a.id=r.alarm_id WHERE a.family_id=$1 AND a.created_at>now()-interval '7 days'`,[user.family_id])).rows;
+    const now = Date.now();
+    return alarms.filter(alarm => alarm.sender_id === user.id || recipients.some(recipient => recipient.alarm_id === alarm.id && recipient.user_id === user.id)).map(alarm => ({
+      id: alarm.id, senderId: alarm.sender_id, senderName: alarm.sender_name,
+      createdAt: alarm.created_at, expiresAt: alarm.expires_at, cancelledAt: alarm.cancelled_at,
+      active: !alarm.cancelled_at && Date.parse(alarm.expires_at) > now,
+      recipients: recipients.filter(recipient => recipient.alarm_id === alarm.id && (alarm.sender_id === user.id || recipient.user_id === user.id)).map(recipient => ({ id: recipient.user_id, name: recipient.display_name, acknowledgedAt: recipient.acknowledged_at }))
+    }));
+  }
+  async function createAlarm(user, requestId) {
+    if (!user.family_id) throw Object.assign(new Error('Skapa eller gå med i en familj först'), { status: 409 });
+    if (typeof requestId !== 'string' || !/^[A-Za-z0-9_-]{20,80}$/.test(requestId)) throw Object.assign(new Error('Ogiltigt begäran-ID'), { status: 400 });
+    const client = await pool.connect();
+    let alarmId;
+    try {
+      await client.query('BEGIN');
+      const member = (await client.query('SELECT id FROM family_users WHERE id=$1 AND family_id=$2 FOR UPDATE',[user.id,user.family_id])).rows[0];
+      if (!member) throw Object.assign(new Error('Du ingår inte längre i familjen'), { status: 403 });
+      const existing = (await client.query('SELECT id FROM family_alarms WHERE sender_id=$1 AND request_id=$2',[user.id,requestId])).rows[0];
+      if (existing) alarmId = existing.id;
+      else {
+        const recent = (await client.query(`SELECT id FROM family_alarms WHERE sender_id=$1 AND created_at>now()-interval '1 minute' ORDER BY created_at DESC LIMIT 1`,[user.id])).rows[0];
+        if (recent) throw Object.assign(new Error('Vänta en minut innan du skickar ett nytt familjelarm'), { status: 429 });
+        const recipients = (await client.query('SELECT id FROM family_users WHERE family_id=$1 AND id<>$2',[user.family_id,user.id])).rows;
+        if (!recipients.length) throw Object.assign(new Error('Lägg till en familjemedlem innan du skickar larm'), { status: 409 });
+        alarmId = randomUUID();
+        await client.query(`INSERT INTO family_alarms(id,family_id,sender_id,request_id,expires_at) VALUES($1,$2,$3,$4,now()+interval '15 minutes')`,[alarmId,user.family_id,user.id,requestId]);
+        for (const recipient of recipients) await client.query('INSERT INTO family_alarm_recipients(alarm_id,user_id) VALUES($1,$2)',[alarmId,recipient.id]);
+        for (const hook of alarmHooks) await hook(user, recipients, alarmId, client);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+    return (await listAlarms(user)).find(alarm => alarm.id === alarmId);
+  }
+  async function acknowledgeAlarm(user, id) {
+    if (!user.family_id) throw Object.assign(new Error('Familjelarmet finns inte'), { status: 404 });
+    const alarm = (await query('SELECT id FROM family_alarms WHERE id=$1 AND family_id=$2',[id,user.family_id])).rows[0];
+    if (!alarm) throw Object.assign(new Error('Familjelarmet finns inte'), { status: 404 });
+    const updated = (await query('UPDATE family_alarm_recipients SET acknowledged_at=COALESCE(acknowledged_at,now()) WHERE alarm_id=$1 AND user_id=$2 RETURNING alarm_id',[id,user.id])).rows[0];
+    if (!updated) throw Object.assign(new Error('Familjelarmet är inte adresserat till dig'), { status: 403 });
+    return { ok: true };
+  }
+  async function cancelAlarm(user, id) {
+    if (!user.family_id) throw Object.assign(new Error('Familjelarmet finns inte'), { status: 404 });
+    const updated = (await query('UPDATE family_alarms SET cancelled_at=COALESCE(cancelled_at,now()) WHERE id=$1 AND family_id=$2 AND sender_id=$3 RETURNING id',[id,user.family_id,user.id])).rows[0];
+    if (!updated) throw Object.assign(new Error('Bara avsändaren kan avsluta larmet'), { status: 403 });
+    return { ok: true };
   }
   async function createGroup(user, name) {
     if (user.family_id) throw Object.assign(new Error('Du ingår redan i en familj'), { status: 409 });
@@ -137,16 +215,34 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     const removed = (await query('DELETE FROM family_zones WHERE id=$1 AND family_id=$2 RETURNING id',[id,family.id])).rows[0];
     if (removed) await query('DELETE FROM family_zone_state WHERE zone_id=$1',[id]);
   }
+  async function addChildItem(user, body) {
+    const family = await requireOwner(user);
+    const childName = cleanName(body?.childName);
+    const itemName = cleanName(body?.itemName);
+    if (!childName || !itemName) throw Object.assign(new Error('Ange barnets namn och AirTag-namnet i Hitta'), { status: 400 });
+    const id = randomUUID();
+    await query('INSERT INTO family_child_items(id,family_id,child_name,item_name) VALUES($1,$2,$3,$4)',[id,family.id,childName,itemName]);
+    return id;
+  }
+  async function removeChildItem(user, id) {
+    const family = await requireOwner(user);
+    await query('DELETE FROM family_child_items WHERE id=$1 AND family_id=$2',[id,family.id]);
+  }
   async function leave(user) {
     if (!user.family_id) return;
     const family = (await query('SELECT owner_id FROM family_groups WHERE id=$1',[user.family_id])).rows[0];
     if (family?.owner_id === user.id) throw Object.assign(new Error('Skaparen kan inte lämna familjen; övriga medlemmar behöver först lämna'), { status: 409 });
     await stop(user);
+    await query('DELETE FROM family_messages WHERE recipient_id IS NOT NULL AND (sender_id=$1 OR recipient_id=$1)',[user.id]);
+    await query('DELETE FROM family_alarm_recipients WHERE user_id=$1',[user.id]);
+    await query('DELETE FROM family_alarm_recipients WHERE alarm_id IN (SELECT id FROM family_alarms WHERE sender_id=$1)',[user.id]);
+    await query('DELETE FROM family_alarms WHERE sender_id=$1',[user.id]);
     await query('UPDATE family_users SET family_id=NULL WHERE id=$1',[user.id]);
   }
   async function stop(user) {
     await query('UPDATE family_users SET sharing=false WHERE id=$1',[user.id]);
     await query('DELETE FROM family_positions WHERE user_id=$1',[user.id]);
+    await query('DELETE FROM family_position_history WHERE user_id=$1',[user.id]);
     await query('DELETE FROM family_zone_state WHERE user_id=$1',[user.id]);
   }
   async function setPoliceAreaAlerts(user, enabled) {
@@ -169,9 +265,13 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
       }
     }
     await query('DELETE FROM family_alerts WHERE subject_id=$1',[user.id]);
-    await query('DELETE FROM family_messages WHERE sender_id=$1',[user.id]);
+    await query('DELETE FROM family_messages WHERE sender_id=$1 OR recipient_id=$1',[user.id]);
+    await query('DELETE FROM family_alarm_recipients WHERE user_id=$1',[user.id]);
+    await query('DELETE FROM family_alarm_recipients WHERE alarm_id IN (SELECT id FROM family_alarms WHERE sender_id=$1)',[user.id]);
+    await query('DELETE FROM family_alarms WHERE sender_id=$1',[user.id]);
     await query('DELETE FROM family_push WHERE user_id=$1',[user.id]);
     await query('DELETE FROM family_positions WHERE user_id=$1',[user.id]);
+    await query('DELETE FROM family_position_history WHERE user_id=$1',[user.id]);
     await query('DELETE FROM family_zone_state WHERE user_id=$1',[user.id]);
     await query('DELETE FROM family_sessions WHERE user_id=$1',[user.id]);
     await query('DELETE FROM family_users WHERE id=$1',[user.id]);
@@ -245,6 +345,11 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     if (!validPoint(point) || !Number.isFinite(point.accuracy) || point.accuracy < 0 || point.accuracy > 5000) throw Object.assign(new Error('Ogiltig GPS-position'), { status: 400 });
     await query('UPDATE family_users SET sharing=true WHERE id=$1',[user.id]);
     await query('INSERT INTO family_positions(user_id,lat,lon,accuracy,updated_at) VALUES($1,$2,$3,$4,now()) ON CONFLICT(user_id) DO UPDATE SET lat=EXCLUDED.lat,lon=EXCLUDED.lon,accuracy=EXCLUDED.accuracy,updated_at=now()',[user.id,point.lat,point.lon,point.accuracy]);
+    const last = (await query('SELECT recorded_at FROM family_position_history WHERE user_id=$1 AND family_id=$2 ORDER BY recorded_at DESC LIMIT 1',[user.id,user.family_id])).rows[0];
+    if (!last || Date.now()-new Date(last.recorded_at).getTime()>=10_000) {
+      await query('INSERT INTO family_position_history(id,family_id,user_id,lat,lon,accuracy) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),user.family_id,user.id,point.lat,point.lon,point.accuracy]);
+    }
+    await query(`DELETE FROM family_position_history WHERE user_id=$1 AND recorded_at<=now()-interval '6 hours'`,[user.id]);
     if (point.accuracy > 200) return { alerts: 0, accuracyWarning: true };
     return { alerts: await checkPosition(user,point,events), accuracyWarning: false };
   }
@@ -253,7 +358,10 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     await query('DELETE FROM family_sessions WHERE expires_at<now()');
     await query('DELETE FROM family_invites WHERE expires_at<now() OR used=true');
     await query(`DELETE FROM family_positions WHERE updated_at<now()-interval '15 minutes'`);
+    await query(`DELETE FROM family_position_history WHERE recorded_at<=now()-interval '6 hours'`);
     await query(`DELETE FROM family_alerts WHERE created_at<now()-interval '7 days'`);
+    await query(`DELETE FROM family_alarm_recipients WHERE alarm_id IN (SELECT id FROM family_alarms WHERE created_at<now()-interval '7 days')`);
+    await query(`DELETE FROM family_alarms WHERE created_at<now()-interval '7 days'`);
     await query(`DELETE FROM family_messages WHERE created_at<now()-interval '30 days'`);
     const rows = (await query(`SELECT u.id,u.display_name,u.family_id,u.sharing,p.lat,p.lon,p.accuracy FROM family_users u JOIN family_positions p ON p.user_id=u.id WHERE u.sharing=true AND u.family_id IS NOT NULL AND p.accuracy<=200 AND p.updated_at>now()-interval '15 minutes'`)).rows;
     for (const row of rows) await checkReports(row,{lat:row.lat,lon:row.lon},events);
@@ -268,5 +376,5 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     await query('INSERT INTO family_push(endpoint,user_id,subscription) VALUES($1,$2,$3) ON CONFLICT(endpoint) DO UPDATE SET user_id=EXCLUDED.user_id,subscription=EXCLUDED.subscription',[subscription.endpoint,user.id,subscription]);
   }
   async function unsubscribe(user, endpoint) { await query('DELETE FROM family_push WHERE user_id=$1 AND endpoint=$2',[user.id,endpoint]); }
-  return { available, pushEnabled, vapidPublic: pushEnabled ? vapidPublic : null, init, session, register, login, logout, overview, listMessages, sendMessage, createGroup, invite, join, addZone, removeZone, leave, stop, setPoliceAreaAlerts, deleteAccount, reportLocation, sweep, subscribe, unsubscribe, cookie };
+  return { pool, addAccountCleanup: fn => accountCleanupHooks.push(fn), addAlarmHook: fn => alarmHooks.push(fn), available, pushEnabled, vapidPublic: pushEnabled ? vapidPublic : null, init, session, register, login, logout, overview, listMessages, sendMessage, listAlarms, createAlarm, acknowledgeAlarm, cancelAlarm, createGroup, invite, join, addZone, removeZone, addChildItem, removeChildItem, leave, stop, setPoliceAreaAlerts, deleteAccount, reportLocation, sweep, subscribe, unsubscribe, cookie, query };
 }

@@ -21,7 +21,7 @@ export function createFamilyApi(options = {}) {
   async function handle(req,res,url,getEvents) {
     try {
       if (!service.available) return reply(req,res,503,{error:'Familjekonton kräver persistent databas på servern',code:'DATABASE_NOT_CONFIGURED'});
-      if (url.pathname === '/api/family/config' && req.method === 'GET') return reply(req,res,200,{enabled:true,persistent:Boolean(process.env.DATABASE_URL),preview:process.env.FAMILY_PREVIEW_MODE==='true',pushEnabled:service.pushEnabled,vapidPublic:service.vapidPublic});
+      if (url.pathname === '/api/family/config' && req.method === 'GET') return reply(req,res,200,{enabled:true,positionHistoryHours:6,privateChatEnabled:true,persistent:Boolean(process.env.DATABASE_URL),preview:process.env.FAMILY_PREVIEW_MODE==='true',pushEnabled:service.pushEnabled,vapidPublic:service.vapidPublic});
       if (['/api/family/register','/api/family/login'].includes(url.pathname)) {
         if (req.method !== 'POST') return reply(req,res,405,{error:'Metoden stöds inte'});
         const key = `${req.socket.remoteAddress}:${url.pathname}`;
@@ -37,13 +37,14 @@ export function createFamilyApi(options = {}) {
       const user = await service.session(req);
       if (!user) return reply(req,res,401,{error:'Logga in för att använda familjefunktioner'});
       if (url.pathname === '/api/family/me' && req.method === 'GET') return reply(req,res,200,await service.overview(user));
-      if (url.pathname === '/api/family/messages' && req.method === 'GET') return reply(req,res,200,{messages:await service.listMessages(user)});
+      if (url.pathname === '/api/family/messages' && req.method === 'GET') return reply(req,res,200,{messages:await service.listMessages(user,url.searchParams.get('memberId'))});
+      if (url.pathname === '/api/family/alarms' && req.method === 'GET') return reply(req,res,200,{alarms:await service.listAlarms(user)});
       if (req.method === 'POST') {
         const data = await body(req);
         if (url.pathname === '/api/family/messages') {
           const last = chatSentAt.get(user.id) || 0;
           if (Date.now() - last < 1000) return reply(req,res,429,{error:'Vänta en sekund innan nästa meddelande'});
-          const message = await service.sendMessage(user,data.body);
+          const message = await service.sendMessage(user,data.body,data.recipientId??null);
           chatSentAt.set(user.id,Date.now());
           if (chatSentAt.size > 1000) chatSentAt.clear();
           return reply(req,res,200,message);
