@@ -20,8 +20,9 @@ export function createFamilyApi(options = {}) {
   const service = createFamilyService(options);
   async function handle(req,res,url,getEvents) {
     try {
+      if(process.env.FAMILY_WRITE_PAUSED==='true'&&['POST','DELETE','PUT','PATCH'].includes(req.method))return reply(req,res,503,{error:'Familjetjänsten uppdateras. Försök igen om en stund.',code:'MAINTENANCE'});
       if (!service.available) return reply(req,res,503,{error:'Familjekonton kräver persistent databas på servern',code:'DATABASE_NOT_CONFIGURED'});
-      if (url.pathname === '/api/family/config' && req.method === 'GET') return reply(req,res,200,{enabled:true,positionHistoryHours:6,privateChatEnabled:true,persistent:Boolean(process.env.DATABASE_URL),preview:process.env.FAMILY_PREVIEW_MODE==='true',pushEnabled:service.pushEnabled,vapidPublic:service.vapidPublic});
+      if (url.pathname === '/api/family/config' && req.method === 'GET') return reply(req,res,200,{enabled:true,positionHistoryHours:6,privateChatEnabled:true,sharingSessionsEnabled:true,persistent:Boolean(process.env.DATABASE_URL),preview:process.env.FAMILY_PREVIEW_MODE==='true',pushEnabled:service.pushEnabled,vapidPublic:service.vapidPublic});
       if (['/api/family/register','/api/family/login'].includes(url.pathname)) {
         if (req.method !== 'POST') return reply(req,res,405,{error:'Metoden stöds inte'});
         const key = `${req.socket.remoteAddress}:${url.pathname}`;
@@ -60,6 +61,7 @@ export function createFamilyApi(options = {}) {
           const policeAvailable = Boolean(events.fetchedAt && !events.stale);
           return reply(req,res,200,{ok:true,...await service.reportLocation(user,data,policeAvailable ? events.events : []),policeAvailable});
         }
+        if (url.pathname === '/api/family/sharing/start') return reply(req,res,200,await service.startSharing(user));
         if (url.pathname === '/api/family/stop') { await service.stop(user); return reply(req,res,200,{ok:true}); }
         if (url.pathname === '/api/family/leave') { await service.leave(user); return reply(req,res,200,{ok:true}); }
         if (url.pathname === '/api/family/push') { await service.subscribe(user,data.subscription); return reply(req,res,200,{ok:true}); }
@@ -73,7 +75,7 @@ export function createFamilyApi(options = {}) {
       return reply(req,res,404,{error:'Familjefunktionen finns inte'});
     } catch (err) {
       if (!err.status) console.error('[family] Serverfel:',err.message);
-      return reply(req,res,err.status || 500,{error:err.status ? err.message : 'Familjefunktionen svarar inte'});
+      return reply(req,res,err.status || 500,{error:err.status ? err.message : 'Familjefunktionen svarar inte',...(err.code?{code:err.code}:{})});
     }
   }
   return {service,handle};

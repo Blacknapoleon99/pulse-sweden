@@ -30,6 +30,8 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     if (!pool) return;
     await query(`CREATE TABLE IF NOT EXISTS family_users (id text PRIMARY KEY, email text UNIQUE NOT NULL, display_name text NOT NULL, salt text NOT NULL, password_hash text NOT NULL, family_id text, sharing boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now())`);
     await query(`ALTER TABLE family_users ADD COLUMN IF NOT EXISTS police_area_alerts boolean NOT NULL DEFAULT false`);
+    await query('ALTER TABLE family_users ADD COLUMN IF NOT EXISTS sharing_session_hash text');
+    await query('ALTER TABLE family_users ADD COLUMN IF NOT EXISTS sharing_session_required boolean NOT NULL DEFAULT false');
     await query(`CREATE TABLE IF NOT EXISTS family_groups (id text PRIMARY KEY, name text NOT NULL, owner_id text NOT NULL)`);
     await query(`CREATE TABLE IF NOT EXISTS family_sessions (token_hash text PRIMARY KEY, user_id text NOT NULL, expires_at timestamptz NOT NULL)`);
     await query(`CREATE TABLE IF NOT EXISTS family_invites (token_hash text PRIMARY KEY, family_id text NOT NULL, expires_at timestamptz NOT NULL, used boolean NOT NULL DEFAULT false)`);
@@ -85,6 +87,8 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     return { user: { id: user.id, email: user.email, display_name: user.display_name, family_id: user.family_id, sharing: user.sharing, police_area_alerts: user.police_area_alerts }, token: await signIn(user) };
   }
   async function logout(req) {
+    const user = await session(req);
+    if (user) await stop(user);
     const value = sessionToken(req);
     if (value) await query(`DELETE FROM family_sessions WHERE token_hash=$1`, [hash(value)]);
   }
@@ -240,10 +244,21 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     await query('UPDATE family_users SET family_id=NULL WHERE id=$1',[user.id]);
   }
   async function stop(user) {
-    await query('UPDATE family_users SET sharing=false WHERE id=$1',[user.id]);
-    await query('DELETE FROM family_positions WHERE user_id=$1',[user.id]);
-    await query('DELETE FROM family_position_history WHERE user_id=$1',[user.id]);
-    await query('DELETE FROM family_zone_state WHERE user_id=$1',[user.id]);
+    const client=await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT id FROM family_users WHERE id=$1 FOR UPDATE',[user.id]);
+      await client.query('UPDATE family_users SET sharing=false,sharing_session_hash=NULL,sharing_session_required=true WHERE id=$1',[user.id]);
+      for(const table of ['family_positions','family_position_history','family_zone_state'])await client.query(`DELETE FROM ${table} WHERE user_id=$1`,[user.id]);
+      await client.query('COMMIT');
+    }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+  }
+  async function startSharing(user) {
+    if(!user.family_id)throw Object.assign(new Error('Skapa eller gå med i en familj först'),{status:409});
+    const sharingSessionId=token();
+    const row=(await query('UPDATE family_users SET sharing_session_hash=$3,sharing_session_required=true WHERE id=$1 AND family_id=$2 RETURNING id',[user.id,user.family_id,hash(sharingSessionId)])).rows[0];
+    if(!row)throw Object.assign(new Error('Du ingår inte längre i familjen'),{status:403});
+    return {sharingSessionId};
   }
   async function setPoliceAreaAlerts(user, enabled) {
     if (typeof enabled !== 'boolean') throw Object.assign(new Error('Välj om områdesvarningar ska vara på eller av'), { status: 400 });
@@ -343,17 +358,28 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
   async function reportLocation(user, point, events = []) {
     if (!user.family_id) throw Object.assign(new Error('Skapa eller gå med i en familj först'), { status: 409 });
     if (!validPoint(point) || !Number.isFinite(point.accuracy) || point.accuracy < 0 || point.accuracy > 5000) throw Object.assign(new Error('Ogiltig GPS-position'), { status: 400 });
-    await query('UPDATE family_users SET sharing=true WHERE id=$1',[user.id]);
-    await query('INSERT INTO family_positions(user_id,lat,lon,accuracy,updated_at) VALUES($1,$2,$3,$4,now()) ON CONFLICT(user_id) DO UPDATE SET lat=EXCLUDED.lat,lon=EXCLUDED.lon,accuracy=EXCLUDED.accuracy,updated_at=now()',[user.id,point.lat,point.lon,point.accuracy]);
-    const last = (await query('SELECT recorded_at FROM family_position_history WHERE user_id=$1 AND family_id=$2 ORDER BY recorded_at DESC LIMIT 1',[user.id,user.family_id])).rows[0];
-    if (!last || Date.now()-new Date(last.recorded_at).getTime()>=10_000) {
-      await query('INSERT INTO family_position_history(id,family_id,user_id,lat,lon,accuracy) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),user.family_id,user.id,point.lat,point.lon,point.accuracy]);
-    }
-    await query(`DELETE FROM family_position_history WHERE user_id=$1 AND recorded_at<=now()-interval '6 hours'`,[user.id]);
+    const observedAt=point.observedAt??Date.now();
+    if(!Number.isFinite(observedAt)||observedAt<Date.now()-120_000||observedAt>Date.now()+30_000)throw Object.assign(new Error('GPS-positionen är för gammal eller har ogiltig tid'),{status:400});
+    const client=await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const current=(await client.query('SELECT family_id,sharing_session_hash,sharing_session_required FROM family_users WHERE id=$1 FOR UPDATE',[user.id])).rows[0];
+      if(!current||current.family_id!==user.family_id)throw Object.assign(new Error('Du ingår inte längre i familjen'),{status:403});
+      if(current.sharing_session_required&&(!point.sharingSessionId||hash(String(point.sharingSessionId))!==current.sharing_session_hash))throw Object.assign(new Error('Platsdelningen har stoppats. Starta en ny delning.'),{status:409,code:'SHARING_SESSION_REVOKED'});
+      const previous=(await client.query('SELECT updated_at FROM family_positions WHERE user_id=$1',[user.id])).rows[0];
+      if(previous&&new Date(previous.updated_at).getTime()>=observedAt){await client.query('COMMIT');return {alerts:0,ignored:true};}
+      await client.query('UPDATE family_users SET sharing=true WHERE id=$1',[user.id]);
+      await client.query('INSERT INTO family_positions(user_id,lat,lon,accuracy,updated_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(user_id) DO UPDATE SET lat=EXCLUDED.lat,lon=EXCLUDED.lon,accuracy=EXCLUDED.accuracy,updated_at=EXCLUDED.updated_at',[user.id,point.lat,point.lon,point.accuracy,new Date(observedAt)]);
+      const last=(await client.query('SELECT recorded_at FROM family_position_history WHERE user_id=$1 AND family_id=$2 ORDER BY recorded_at DESC LIMIT 1',[user.id,user.family_id])).rows[0];
+      if(!last||observedAt-new Date(last.recorded_at).getTime()>=10_000)await client.query('INSERT INTO family_position_history(id,family_id,user_id,lat,lon,accuracy,recorded_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[randomUUID(),user.family_id,user.id,point.lat,point.lon,point.accuracy,new Date(observedAt)]);
+      await client.query(`DELETE FROM family_position_history WHERE user_id=$1 AND recorded_at<=now()-interval '6 hours'`,[user.id]);
+      await client.query('COMMIT');
+    }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
     if (point.accuracy > 200) return { alerts: 0, accuracyWarning: true };
     return { alerts: await checkPosition(user,point,events), accuracyWarning: false };
   }
   async function sweep(events) {
+    if(process.env.FAMILY_WRITE_PAUSED==='true')return;
     if (!pool) return;
     await query('DELETE FROM family_sessions WHERE expires_at<now()');
     await query('DELETE FROM family_invites WHERE expires_at<now() OR used=true');
@@ -376,5 +402,5 @@ export function createFamilyService({ connectionString = process.env.DATABASE_UR
     await query('INSERT INTO family_push(endpoint,user_id,subscription) VALUES($1,$2,$3) ON CONFLICT(endpoint) DO UPDATE SET user_id=EXCLUDED.user_id,subscription=EXCLUDED.subscription',[subscription.endpoint,user.id,subscription]);
   }
   async function unsubscribe(user, endpoint) { await query('DELETE FROM family_push WHERE user_id=$1 AND endpoint=$2',[user.id,endpoint]); }
-  return { pool, addAccountCleanup: fn => accountCleanupHooks.push(fn), addAlarmHook: fn => alarmHooks.push(fn), available, pushEnabled, vapidPublic: pushEnabled ? vapidPublic : null, init, session, register, login, logout, overview, listMessages, sendMessage, listAlarms, createAlarm, acknowledgeAlarm, cancelAlarm, createGroup, invite, join, addZone, removeZone, addChildItem, removeChildItem, leave, stop, setPoliceAreaAlerts, deleteAccount, reportLocation, sweep, subscribe, unsubscribe, cookie, query };
+  return { pool, addAccountCleanup: fn => accountCleanupHooks.push(fn), addAlarmHook: fn => alarmHooks.push(fn), available, pushEnabled, vapidPublic: pushEnabled ? vapidPublic : null, init, session, register, login, logout, overview, listMessages, sendMessage, listAlarms, createAlarm, acknowledgeAlarm, cancelAlarm, createGroup, invite, join, addZone, removeZone, addChildItem, removeChildItem, leave, stop, startSharing, setPoliceAreaAlerts, deleteAccount, reportLocation, sweep, subscribe, unsubscribe, cookie, query };
 }
