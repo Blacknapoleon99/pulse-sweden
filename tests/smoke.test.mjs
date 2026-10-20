@@ -31,6 +31,27 @@ test('HTTP routing, input validation, health, HEAD and private files', async () 
     assert.match(manifest.headers.get('content-type'), /manifest\+json/);
     assert.equal((await manifest.json()).display, 'standalone');
     assert.equal((await fetch(base + '/icon-192.png')).status, 200);
+    for (const asset of ['cajklops-opening.js', 'cajklops-opening.css', 'assets/cajklops-poster.png', 'assets/cajklops-icon.png', 'assets/cajklops-everyday.mp4']) {
+      assert.equal((await fetch(base + '/' + asset)).status, 200, asset);
+    }
+    const videoHead = await fetch(base + '/assets/cajklops-opening.mp4', { method: 'HEAD' });
+    assert.equal(videoHead.headers.get('content-type'), 'video/mp4');
+    assert.equal(videoHead.headers.get('accept-ranges'), 'bytes');
+    const videoSize = Number(videoHead.headers.get('content-length'));
+    assert.ok(videoSize > 1000);
+    const firstBytes = await fetch(base + '/assets/cajklops-opening.mp4', { headers: { Range: 'bytes=0-31' } });
+    assert.equal(firstBytes.status, 206);
+    assert.equal(firstBytes.headers.get('content-range'), `bytes 0-31/${videoSize}`);
+    assert.equal((await firstBytes.arrayBuffer()).byteLength, 32);
+    const tail = await fetch(base + '/assets/cajklops-opening.mp4', { headers: { Range: 'bytes=-16' } });
+    assert.equal(tail.status, 206);
+    assert.equal((await tail.arrayBuffer()).byteLength, 16);
+    const rangeHead = await fetch(base + '/assets/cajklops-opening.mp4', { method: 'HEAD', headers: { Range: 'bytes=0-1' } });
+    assert.equal(rangeHead.status, 206);
+    assert.equal(await rangeHead.text(), '');
+    for (const range of ['bytes=999999999-', 'bytes=5-2', 'bytes=-0', 'bytes=-', 'invalid']) {
+      assert.equal((await fetch(base + '/assets/cajklops-opening.mp4', { headers: { Range: range } })).status, 416, range);
+    }
     const mapConfig = await (await fetch(base + '/api/map-config')).json();
     assert.ok(['carto', 'openstreetmap'].includes(mapConfig.provider));
     assert.deepEqual(Object.keys(mapConfig), ['provider']);

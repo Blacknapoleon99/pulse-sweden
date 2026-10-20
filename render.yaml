@@ -1,38 +1,153 @@
-services:
-  - type: web
-    name: tryggpuls
-    repo: https://github.com/Blacknapoleon99/pulse-sweden
-    branch: demo-polish-release
-    region: oregon
-    runtime: node
-    plan: free
-    buildCommand: npm ci --omit=dev
-    startCommand: npm start
-    healthCheckPath: /api/health
-    autoDeploy: true
-    envVars:
-      - key: PORT
-        value: "10000"
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: tryggpuls-family
-          property: connectionString
-      - key: CARTO_BASEMAP_API_KEY
-        sync: false
-      - key: TRAFIKVERKET_API_KEY
-        sync: false
-      - key: ZONE_ADMIN_TOKEN
-        sync: false
-      - key: VAPID_PUBLIC_KEY
-        sync: false
-      - key: VAPID_PRIVATE_KEY
-        sync: false
-      - key: FAMILY_PREVIEW_MODE
-        value: "true"
-
-databases:
-  - name: tryggpuls-family
-    region: oregon
-    plan: free
+# Create a NEW Blueprint. Keep Oregon resources until migration and rollback
+# are rehearsed. Provisioning and spending are owner-controlled.
+previews:
+  generation: off
+projects:
+  - name: TryggPuls Mobile Release
+    environments:
+      - name: staging
+        services:
+          - type: web
+            name: tryggpuls-staging-frankfurt
+            repo: https://github.com/Blacknapoleon99/pulse-sweden
+            branch: demo-polish-release
+            runtime: node
+            region: frankfurt
+            plan: starter
+            buildCommand: npm ci --omit=dev
+            preDeployCommand: npm run migrate
+            startCommand: npm start
+            healthCheckPath: /api/ready
+            autoDeployTrigger: checksPass
+            envVars:
+              - key: NODE_ENV
+                value: production
+              - key: NODE_VERSION
+                value: "24"
+              - key: APP_ENV
+                value: staging
+              - key: TRYGGPULS_LOAD_ENVFILE
+                value: "false"
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: tryggpuls-staging-db-frankfurt
+                  property: connectionString
+              - key: COMMUNITY_PUBLISHING_ENABLED
+                value: "false"
+              - key: COMMUNITY_LAUNCH_APPROVED
+                value: "false"
+              - key: MODERATION_STAFFED
+                value: "false"
+              - key: NATIVE_PUSH_ENABLED
+                value: "false"
+              - key: FAMILY_PREVIEW_MODE
+                value: "false"
+              - key: AWS_REGION
+                value: eu-north-1
+              - key: BANKID_ENV
+                value: test
+              - key: PUBLIC_APP_URL
+                sync: false
+              - key: SUPPORT_EMAIL
+                sync: false
+              - key: MODERATION_EMAIL
+                sync: false
+              - key: OPERATIONS_EMAIL
+                sync: false
+              - key: ZONE_ADMIN_TOKENS_JSON
+                sync: false
+              - key: COMMUNITY_S3_BUCKET
+                sync: false
+              - key: AWS_ACCESS_KEY_ID
+                sync: false
+              - key: AWS_SECRET_ACCESS_KEY
+                sync: false
+              - key: RESEND_API_KEY
+                sync: false
+              - key: EMAIL_FROM
+                sync: false
+              - key: SENTRY_DSN
+                sync: false
+              - key: EXPO_ACCESS_TOKEN
+                sync: false
+              - key: TRAFIKVERKET_API_KEY
+                sync: false
+        databases:
+          - name: tryggpuls-staging-db-frankfurt
+            region: frankfurt
+            plan: basic-256mb
+            postgresMajorVersion: "17"
+            ipAllowList: []
+      - name: production
+        services:
+          - type: web
+            name: tryggpuls-production-frankfurt
+            repo: https://github.com/Blacknapoleon99/pulse-sweden
+            branch: demo-polish-release
+            runtime: node
+            region: frankfurt
+            plan: starter
+            buildCommand: npm ci --omit=dev
+            preDeployCommand: npm run migrate
+            startCommand: npm start
+            healthCheckPath: /api/ready
+            autoDeployTrigger: off
+            envVars:
+              - key: NODE_ENV
+                value: production
+              - key: NODE_VERSION
+                value: "24"
+              - key: APP_ENV
+                value: production
+              - key: TRYGGPULS_LOAD_ENVFILE
+                value: "false"
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: tryggpuls-production-db-frankfurt
+                  property: connectionString
+              - key: COMMUNITY_PUBLISHING_ENABLED
+                value: "false"
+              - key: COMMUNITY_LAUNCH_APPROVED
+                value: "false"
+              - key: MODERATION_STAFFED
+                value: "false"
+              - key: NATIVE_PUSH_ENABLED
+                value: "false"
+              - key: FAMILY_PREVIEW_MODE
+                value: "false"
+              - key: AWS_REGION
+                value: eu-north-1
+              - key: BANKID_ENV
+                value: production
+              - key: PUBLIC_APP_URL
+                sync: false
+              - key: SUPPORT_EMAIL
+                sync: false
+              - key: MODERATION_EMAIL
+                sync: false
+              - key: OPERATIONS_EMAIL
+                sync: false
+              - key: ZONE_ADMIN_TOKENS_JSON
+                sync: false
+              - key: COMMUNITY_S3_BUCKET
+                sync: false
+              - key: AWS_ACCESS_KEY_ID
+                sync: false
+              - key: AWS_SECRET_ACCESS_KEY
+                sync: false
+              - key: RESEND_API_KEY
+                sync: false
+              - key: EMAIL_FROM
+                sync: false
+              - key: SENTRY_DSN
+                sync: false
+              - key: EXPO_ACCESS_TOKEN
+                sync: false
+              - key: TRAFIKVERKET_API_KEY
+                sync: false
+        databases:
+          - name: tryggpuls-production-db-frankfurt
+            region: frankfurt
+            plan: basic-256mb
+            postgresMajorVersion: "17"
+            ipAllowList: []

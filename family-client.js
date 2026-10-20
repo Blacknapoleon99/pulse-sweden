@@ -38,13 +38,33 @@ function renderFamilyApp() {
   if (!info) {
     familyRoot.innerHTML = `${demoNote}<p>Varje medlem använder ett eget konto. En inbjudan ger tillgång till samma familj. Position delas först när personen startar den på sin egen enhet.</p>
       ${familyForm('family-register','Skapa konto',`<label>Namn<input name="name" required maxlength="80" autocomplete="name"></label><label>E-post<input name="email" type="email" required autocomplete="email"></label><label>Lösenord (minst 12 tecken)<input name="password" type="password" required minlength="12" autocomplete="new-password"></label>`,'Skapa konto')}
-      ${familyForm('family-login','Jag har redan konto',`<label>E-post<input name="email" type="email" required autocomplete="email"></label><label>Lösenord<input name="password" type="password" required autocomplete="current-password"></label>`,'Logga in')}`;
+      ${familyForm('family-login','Jag har redan konto',`<label>E-post<input name="email" type="email" required autocomplete="email"></label><label>Lösenord<input name="password" type="password" required autocomplete="current-password"></label>`,'Logga in')}
+      <div class="family-form"><h3>BankID</h3><p>${familyUi.config.bankidEnabled ? `Logga in eller skapa konto med BankID (${safeText(familyUi.config.bankidEnvironment)}).` : 'BankID är inte anslutet på servern ännu.'}</p><button id="family-bankid" class="btn-secondary" ${familyUi.config.bankidEnabled ? '' : 'disabled'}>Logga in eller registrera med BankID</button><small>En ny BankID-identitet skapar ett konto automatiskt. TryggPuls lagrar en nycklad identifierare, inte personnumret.</small></div>`;
     for (const action of ['register','login']) familyRoot.querySelector('#family-' + action).addEventListener('submit', async event => {
       event.preventDefault();
       const form = event.currentTarget;
       const values = Object.fromEntries(new FormData(form));
       try { await familyRequest(action,'POST',values); form.reset(); await familyRefresh(); }
       catch (err) { familyError(err); }
+    });
+    familyRoot.querySelector('#family-bankid').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const order = await familyRequest('bankid/start','POST',{});
+        const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        const launch = mobile
+          ? `https://app.bankid.com/?autostarttoken=${encodeURIComponent(order.autoStartToken)}`
+          : `bankid:///?autostarttoken=${encodeURIComponent(order.autoStartToken)}`;
+        location.href = launch;
+        for (let attempt = 0; attempt < 90; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const result = await familyRequest('bankid/collect','POST',{flowToken:order.flowToken});
+          if (result.status === 'failed') throw new Error('BankID-identifieringen slutfördes inte. Försök igen.');
+          if (result.status === 'complete') { await familyRefresh(); return; }
+        }
+        throw new Error('BankID-sessionen gick ut. Starta inloggningen igen.');
+      } catch (err) { familyError(err); button.disabled = false; }
     });
     return;
   }

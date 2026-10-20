@@ -1,4 +1,5 @@
 import { createFamilyService } from './family.mjs';
+import { createBankIdAuth } from './bankid-auth.mjs';
 
 const attempts = new Map();
 const chatSentAt = new Map();
@@ -18,10 +19,35 @@ async function body(req) {
 }
 export function createFamilyApi(options = {}) {
   const service = createFamilyService(options);
+  const bankId = createBankIdAuth({ familyService: service, query: service.query });
+  async function init() { await service.init(); await bankId.init(); }
+  function rateLimit(req, route, max, periodMs) {
+    const key = `${req.socket.remoteAddress}:${route}`;
+    const recent = (attempts.get(key) || []).filter(t => Date.now() - t < periodMs);
+    if (recent.length >= max) throw Object.assign(new Error('För många försök. Försök igen senare.'), { status: 429 });
+    recent.push(Date.now()); attempts.set(key, recent);
+    if (attempts.size > 1000) attempts.clear();
+  }
   async function handle(req,res,url,getEvents) {
     try {
+      if(process.env.FAMILY_WRITE_PAUSED==='true'&&['POST','DELETE','PUT','PATCH'].includes(req.method))return reply(req,res,503,{error:'Familjetjänsten uppdateras. Försök igen om en stund.',code:'MAINTENANCE'});
       if (!service.available) return reply(req,res,503,{error:'Familjekonton kräver persistent databas på servern',code:'DATABASE_NOT_CONFIGURED'});
-      if (url.pathname === '/api/family/config' && req.method === 'GET') return reply(req,res,200,{enabled:true,persistent:Boolean(process.env.DATABASE_URL),preview:process.env.FAMILY_PREVIEW_MODE==='true',pushEnabled:service.pushEnabled,vapidPublic:service.vapidPublic});
+      if (url.pathname === '/api/family/config' && req.method === 'GET') return reply(req,res,200,{enabled:true,positionHistoryHours:6,privateChatEnabled:true,sharingSessionsEnabled:true,persistent:Boolean(process.env.DATABASE_URL),preview:process.env.FAMILY_PREVIEW_MODE==='true',pushEnabled:service.pushEnabled,vapidPublic:service.vapidPublic,bankidEnabled:bankId.configured,bankidEnvironment:bankId.environment});
+      if (url.pathname === '/api/family/bankid/config' && req.method === 'GET') return reply(req,res,200,{enabled:bankId.configured,environment:bankId.environment});
+      if (url.pathname === '/api/family/bankid/start') {
+        if (req.method !== 'POST') return reply(req,res,405,{error:'Metoden stöds inte'});
+        rateLimit(req, 'bankid-start', 8, 15 * 60_000);
+        await body(req);
+        return reply(req,res,200,await bankId.start(req));
+      }
+      if (url.pathname === '/api/family/bankid/collect') {
+        if (req.method !== 'POST') return reply(req,res,405,{error:'Metoden stöds inte'});
+        rateLimit(req, 'bankid-collect', 120, 5 * 60_000);
+        const data = await body(req);
+        const result = await bankId.collect(data.flowToken);
+        const native = req.headers['x-tryggpuls-client'] === 'native';
+        return reply(req,res,200,{status:result.status,...(result.status === 'complete' ? { user:result.user,...(native ? {token:result.token} : {}) } : {})},result.status === 'complete' && !native ? service.cookie(result.token,process.env.NODE_ENV==='production') : undefined);
+      }
       if (['/api/family/register','/api/family/login'].includes(url.pathname)) {
         if (req.method !== 'POST') return reply(req,res,405,{error:'Metoden stöds inte'});
         const key = `${req.socket.remoteAddress}:${url.pathname}`;
@@ -37,18 +63,22 @@ export function createFamilyApi(options = {}) {
       const user = await service.session(req);
       if (!user) return reply(req,res,401,{error:'Logga in för att använda familjefunktioner'});
       if (url.pathname === '/api/family/me' && req.method === 'GET') return reply(req,res,200,await service.overview(user));
-      if (url.pathname === '/api/family/messages' && req.method === 'GET') return reply(req,res,200,{messages:await service.listMessages(user)});
+      if (url.pathname === '/api/family/messages' && req.method === 'GET') return reply(req,res,200,{messages:await service.listMessages(user,url.searchParams.get('memberId'))});
+      if (url.pathname === '/api/family/alarms' && req.method === 'GET') return reply(req,res,200,{alarms:await service.listAlarms(user)});
       if (req.method === 'POST') {
         const data = await body(req);
+        if (url.pathname === '/api/family/alarms') return reply(req,res,201,{alarm:await service.createAlarm(user,data?.requestId)});
+        const alarmAction = /^\/api\/family\/alarms\/([a-f0-9-]{36})\/(acknowledge|cancel)$/i.exec(url.pathname);
+        if (alarmAction) return reply(req,res,200,await (alarmAction[2] === 'acknowledge' ? service.acknowledgeAlarm(user,alarmAction[1]) : service.cancelAlarm(user,alarmAction[1])));
         if (url.pathname === '/api/family/messages') {
           const last = chatSentAt.get(user.id) || 0;
           if (Date.now() - last < 1000) return reply(req,res,429,{error:'Vänta en sekund innan nästa meddelande'});
-          const message = await service.sendMessage(user,data.body);
+          const message = await service.sendMessage(user,data.body,data.recipientId??null);
           chatSentAt.set(user.id,Date.now());
           if (chatSentAt.size > 1000) chatSentAt.clear();
           return reply(req,res,200,message);
         }
-        if (url.pathname === '/api/family/logout') { await service.logout(req); return reply(req,res,200,{ok:true},service.cookie('',process.env.NODE_ENV==='production')); }
+        if (url.pathname === '/api/family/logout') { if(data.pushToken)await service.query('DELETE FROM native_push_devices WHERE user_id=$1 AND token=$2',[user.id,data.pushToken]);await service.logout(req); return reply(req,res,200,{ok:true},service.cookie('',process.env.NODE_ENV==='production')); }
         if (url.pathname === '/api/family/group') return reply(req,res,200,{id:await service.createGroup(user,data.name)});
         if (url.pathname === '/api/family/invite') return reply(req,res,200,{token:await service.invite(user)});
         if (url.pathname === '/api/family/join') { await service.join(user,data.token); return reply(req,res,200,{ok:true}); }
@@ -60,6 +90,7 @@ export function createFamilyApi(options = {}) {
           const policeAvailable = Boolean(events.fetchedAt && !events.stale);
           return reply(req,res,200,{ok:true,...await service.reportLocation(user,data,policeAvailable ? events.events : []),policeAvailable});
         }
+        if (url.pathname === '/api/family/sharing/start') return reply(req,res,200,await service.startSharing(user));
         if (url.pathname === '/api/family/stop') { await service.stop(user); return reply(req,res,200,{ok:true}); }
         if (url.pathname === '/api/family/leave') { await service.leave(user); return reply(req,res,200,{ok:true}); }
         if (url.pathname === '/api/family/push') { await service.subscribe(user,data.subscription); return reply(req,res,200,{ok:true}); }
@@ -74,8 +105,8 @@ export function createFamilyApi(options = {}) {
       return reply(req,res,404,{error:'Familjefunktionen finns inte'});
     } catch (err) {
       if (!err.status) console.error('[family] Serverfel:',err.message);
-      return reply(req,res,err.status || 500,{error:err.status ? err.message : 'Familjefunktionen svarar inte'});
+      return reply(req,res,err.status || 500,{error:err.status ? err.message : 'Familjefunktionen svarar inte',...(err.code ? {code:err.code} : {})});
     }
   }
-  return {service,handle};
+  return {service,bankId,handle,init};
 }

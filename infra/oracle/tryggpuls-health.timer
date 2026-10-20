@@ -1,0 +1,11 @@
+[Unit]
+Description=Check TryggPuls health every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=tryggpuls-health.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,21 @@
+import {createRequire} from 'node:module';
+import {fileURLToPath} from 'node:url';
+import {resolve,join,extname} from 'node:path';
+import {mkdir,readFile} from 'node:fs/promises';
+import {createServer} from 'node:http';
+import {pressNews} from '../../press-news.mjs';
+const root=fileURLToPath(new URL('../../',import.meta.url)),require=createRequire(join(root,'opening/package.json')),{build}=require('esbuild');
+const tools=join(process.env.LOCALAPPDATA,'TryggPulse/tools/mobile-preview/node_modules'),out=join(root,'tmp/mobile-reference-preview'),adapter=join(root,'scripts/mobile-preview/adapters.tsx');
+await mkdir(out,{recursive:true});
+await build({entryPoints:[join(root,'scripts/mobile-preview/index.tsx')],bundle:true,outdir:out,platform:'browser',format:'esm',jsx:'automatic',nodePaths:[tools,join(root,'mobile/node_modules')],loader:{'.ttf':'file','.png':'file','.jpg':'file','.mp4':'file'},define:{global:'globalThis','process.env.NODE_ENV':'"development"','__DEV__':'true'},plugins:[{name:'native-preview',setup(b){
+  b.onResolve({filter:/^react-native$/},()=>({path:join(tools,'react-native-web/dist/index.js')}));
+  b.onResolve({filter:/^react$|^react-dom(?:\/client)?$|^react\/jsx-runtime$/},a=>({path:createRequire(join(tools,'react/package.json')).resolve(a.path)}));
+  b.onResolve({filter:/^@expo\/vector-icons\/FontAwesome6$/},()=>({path:join(root,'scripts/mobile-preview/fontawesome.tsx')}));
+  b.onResolve({filter:/^@expo\/vector-icons(?:\/Ionicons)?$/},()=>({path:join(root,'scripts/mobile-preview/icons.tsx')}));
+  b.onResolve({filter:/react-native-maps|^expo-secure-store$|@react-navigation\/native$|react-native-safe-area-context$|FamilyState$|AppData$|^\.\/api$/},()=>({path:adapter}));
+  b.onResolve({filter:/PrivateFamilyChat|RouteExploreScreen|ProfileScreen|AdminMapItemsScreen|FamilyAlarmScreen|HighlightsCarousel|CommunityCard|CommunityMarkers/},a=>({path:a.path,namespace:'empty-component'}));
+  b.onLoad({filter:/.*/,namespace:'empty-component'},a=>({contents:`export const ${a.path.split('/').pop()}=()=>null;`,loader:'js'}));
+}}]});
+const html='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><title>Trygg-Puls · component preview</title><style>body .grid{flex-wrap:nowrap;width:max-content}</style></head><body><div id="root"></div><script type="module" src="/index.js"></script></body></html>';
+const mime={'.js':'text/javascript','.jpg':'image/jpeg','.png':'image/png','.ttf':'font/ttf'};
+createServer(async(req,res)=>{try{const name=decodeURIComponent(new URL(req.url,'http://localhost').pathname).replace(/^\//,'');if(name==='api/press-news'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(await pressNews.read()));return;}if(!name){res.setHeader('Content-Type','text/html');res.end(html);return;}const file=resolve(out,name);if(!file.startsWith(out+'\\')&&!file.startsWith(out+'/'))throw Error('Invalid path');res.setHeader('Content-Type',mime[extname(file)]||'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404);res.end('Not found');}}).listen(4311,'127.0.0.1',()=>console.log('Shared mobile component preview: http://localhost:4311'));

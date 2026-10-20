@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#eef5f0">
-  <title>Granskade zoner · TryggPuls</title><link rel="stylesheet" href="/style.css?v=3">
-  <script src="/admin.js?v=1" defer></script>
+  <title>Admin · TryggPuls</title><link rel="stylesheet" href="/style.css?v=3">
+  <script src="/admin.js?v=2" defer></script>
 </head>
 <body class="admin-page">
   <main class="admin-shell">
     <a href="/#nara" class="admin-back">← Till TryggPuls</a>
-    <header class="admin-heading"><div><span class="eyebrow">ADMINISTRATÖR · KÄLLBELAGD PUBLICERING</span><h1>Granskade zoner</h1><p>Skapa utkast från officiella myndighetsbeslut. Kontrollera källa, gräns och giltighet innan publicering.</p></div></header>
+    <header class="admin-heading"><div><span class="eyebrow">ADMINISTRATÖR · KÄLLBELAGD PUBLICERING</span><h1>Kartadministration</h1><p>Publicera myndighetsbelagda områden och källgranskade kartmarkörer. Utkast blir inte synliga förrän de har granskats och publicerats.</p></div></header>
     <section class="admin-card admin-auth"><h2>Administratörsåtkomst</h2><label for="admin-token">Administratörsnyckel</label><div class="admin-token-row"><input id="admin-token" type="password" autocomplete="off" placeholder="Ange nyckel för den här sessionen"><button id="admin-connect" class="btn-secondary">Anslut</button></div><p id="admin-status" role="status">Nyckeln används endast i denna webbläsersession och skickas till TryggPuls server över HTTPS.</p></section>
     <form id="zone-form" class="admin-card" hidden>
       <h2>Nytt zonutkast</h2><p>Godkända källor måste vara på Polisen, Krisinformation, SMHI, MCF/MSB eller Länsstyrelsens webbplats.</p>
@@ -27,7 +27,26 @@
       <p id="zone-validity-help">Alla uppgifter behöver ett slutdatum eller sista granskningsdag. När datumet passeras döljs uppgiften och den avslutas automatiskt. Säkerhetszoner får enligt beslutet gälla i högst 14 dagar och publiceras bara med gränser som kan styrkas av beslutets karta.</p>
       <button class="btn-primary" type="submit">Spara som utkast</button>
     </form>
+    <form id="map-item-form" class="admin-card" hidden>
+      <h2>Ny kartmarkör</h2><p>Markören är TryggPuls-granskad och är inte en myndighetsvarning. Använd en aktuell officiell källa; säkerhetsnotiser löper ut inom 14 dagar.</p>
+      <div class="admin-grid">
+        <label>Rubrik<input name="title" maxlength="120" required placeholder="Kort rubrik"></label>
+        <label>Typ<select name="kind" required><option value="safety-notice">Tidsbegränsad säkerhetsnotis</option><option value="service-point">Service- eller stödpunkt</option></select></label>
+        <label>Latitud<input name="lat" type="number" min="54" max="71" step="any" required placeholder="59.3293"></label>
+        <label>Longitud<input name="lon" type="number" min="10" max="25" step="any" required placeholder="18.0686"></label>
+        <label>Källrubrik<input name="sourceTitle" maxlength="240" required></label>
+        <label>Officiell HTTPS-källa<input name="sourceUrl" type="url" required placeholder="https://polisen.se/…"></label>
+        <label>Publicerad / beslutad<input name="sourceDate" type="date" required></label>
+        <label>Giltig från<input name="validFrom" type="datetime-local" required></label>
+        <label>Giltig till / granska senast<input name="validTo" type="datetime-local" required></label>
+      </div>
+      <label>Beskrivning<textarea name="description" maxlength="600" required rows="3" placeholder="Faktatext med källans omfattning och begränsningar"></textarea></label>
+      <label>Ordagrant stödjande källutdrag<textarea name="sourceExcerpt" maxlength="1000" required rows="3"></textarea></label>
+      <button class="btn-primary" type="submit">Spara markör som utkast</button>
+    </form>
+    <section class="admin-card" aria-labelledby="map-items-heading"><div class="admin-list-heading"><h2 id="map-items-heading">Kartmarkörer</h2></div><div id="admin-map-items" aria-live="polite"><p>Anslut med administratörsnyckel för att visa markörer.</p></div></section>
     <section class="admin-card" aria-labelledby="zone-list-heading"><div class="admin-list-heading"><h2 id="zone-list-heading">Publiceringar och granskning</h2><button id="admin-refresh" class="btn-secondary" disabled>Uppdatera lista</button></div><div id="admin-zones" aria-live="polite"><p>Anslut med administratörsnyckel för att visa zonlistan.</p></div></section>
+    <section class="admin-card" id="community-moderation" hidden aria-labelledby="community-heading"><h2 id="community-heading">Användarrapporter och bildgranskning</h2><p>Godkänn bara bilder utan identifierbara personer, personuppgifter, sexuellt eller grafiskt innehåll. Granskning ändrar inte rapportens obekräftade status.</p><p id="community-admin-status" role="status"></p><div id="community-queue"></div><h3>Senaste granskningsåtgärder</h3><div id="community-audit"></div></section>
   </main>
 </body>
 </html>

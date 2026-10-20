@@ -1,13 +1,8 @@
-import { useEffect, useState } from "react";
-import { Ionicons } from "@expo/vector-icons";
-import {
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  Pressable,
-} from "react-native";
+import { Text } from './Typography';
+import { useEffect, useRef,useState } from "react";
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { ActivityIndicator, Linking, RefreshControl, KeyboardAvoidingView, Platform, ScrollView, View, Pressable, useWindowDimensions } from 'react-native';
+import type { Region } from "react-native-maps";
 import type {
   Bulletin,
   CrisisResponse,
@@ -15,21 +10,40 @@ import type {
   EventsResponse,
   Feature,
   FeedResponse,
-  FamilyMessage,
+  MapItem,
+  Point,
+  RouteResponse,
 } from "./api";
-import { familyRequest, familyToken } from "./api";
 import { FamilyScreen } from "./FamilyScreen";
+import {prototypeDashboardStyles as styles} from "./PrototypeDashboardStyles";
 import { StatsScreen } from "./StatsScreen";
 import { ProfileScreen } from "./ProfileScreen";
+import { AdminMapItemsScreen } from "./AdminMapItemsScreen";
+import { FamilyAlarmScreen } from "./FamilyAlarmScreen";
+import { PlaceHistoryScreen } from "./PlaceHistoryScreen";
+import { RouteExploreScreen } from "./RouteExploreScreen";
+import { AppHeader, IncidentTiles, NewsTile, SearchBar, SectionHeader } from './ReferenceKit';
+import { Freshness, SourceDisclosure } from './UI';
+import {newsSource,stableNews} from './newsState';
+import {OverviewMap} from './OverviewMap';
+import {FamilyStrip} from './FamilyStrip';
+import {colors} from './theme';
+import type { CommunityReport } from './communityApi';
+import { latestNearbyEvents, neighborhoodRegion, recentHomeEvents } from './homeMapState';
 
 export type DashboardScreen =
   | "home"
   | "alerts"
   | "news"
   | "family"
+  | "journey"
+  | "history"
+  | "places"
+  | "alarm"
   | "stats"
-  | "info";
-export type Destination = DashboardScreen | "map" | "events" | "route" | "info";
+  | "info"
+  | "admin";
+export type Destination = DashboardScreen | "map" | "events" | "route" | "info" | "admin" | 'community' | 'compose' | 'account';
 
 type Props = {
   screen: DashboardScreen;
@@ -37,25 +51,47 @@ type Props = {
   bottomInset: number;
   events: EventsResponse | null;
   areas: Feature[];
+  allAreas: Feature[];
+  policeAreaYear?: number;
+  mapItems: MapItem[];
+  region: Region;
   nearby: Event[];
   statsEvents: Event[];
   weather: FeedResponse | null;
   crisis: CrisisResponse | null;
   news: FeedResponse | null;
   zoneNews: FeedResponse | null;
+  pressNews?: FeedResponse | null;
   hasLocation: boolean;
+  position?: Point|null;
+  locationError?: string;
+  eventsRefreshing:boolean;
+  plannedRoute?:RouteResponse|null;
+  locationStatus:'unknown'|'loading'|'granted'|'denied'|'error';
+  positionCheckedAt:number|null;
   loading: boolean;
   notice?: string;
   onRefresh: () => void;
   onLocate: () => void;
+  locate: () => Promise<Point | null>;
   go: (screen: Destination) => void;
   openSource: (url?: string) => void;
   onRouteTo: (address: string) => void;
+  initialDestination: string;
+  onRouteResult: (route: RouteResponse) => void;
+  communityReports: CommunityReport[];
+  feedErrors: Record<string,string|null>;
+  onOpenReport: (id:string)=>void;
+  onOpenNews: (item:Bulletin)=>void;
+  onOpenEvents: (category:'robbery'|'violence'|'traffic-accident')=>void;
+  onBack:()=>void;
+  onOpenStats:(municipality?:string)=>void;
+  statsMunicipality?:string;
 };
 
-const navy = "#142942";
-const blue = "#176FE1";
-const muted = "#64768D";
+const navy = "#11152A";
+const blue = "#2187F5";
+const muted = "#72788D";
 
 function time(value?: number | string) {
   if (!value) return "Tid ej angiven";
@@ -83,17 +119,18 @@ function ActionTile({
   tint: string;
   onPress: () => void;
 }) {
+  const {fontScale}=useWindowDimensions();
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      style={({ pressed }) => [styles.actionTile, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.actionTile, fontScale>1.3&&{flexBasis:'45%',flexShrink:0}, pressed && styles.pressed]}
     >
       <View style={[styles.tileIcon, { backgroundColor: tint }]}>
         <Ionicons name={icon} size={22} color={navy} />
       </View>
       <Text style={styles.tileLabel}>{label}</Text>
-      <Text style={styles.tileDetail} numberOfLines={2}>
+      <Text style={styles.tileDetail} numberOfLines={fontScale>1.3?undefined:2}>
         {detail}
       </Text>
     </Pressable>
@@ -110,20 +147,11 @@ function SectionTitle({
   onPress?: () => void;
 }) {
   return (
-    <View style={styles.sectionRow}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {action && onPress && (
-        <Pressable onPress={onPress} accessibilityRole="button">
-          <Text style={styles.sectionAction}>
-            {action} <Ionicons name="arrow-forward" size={14} />
-          </Text>
-        </Pressable>
-      )}
-    </View>
+    <SectionHeader title={title} action={action} onPress={action ? onPress : undefined}/>
   );
 }
 
-function BulletinCard({
+export function BulletinCard({
   item,
   label,
   tone,
@@ -161,35 +189,19 @@ function BulletinCard({
   );
 }
 
-function EventTile({ event, onPress }: { event: Event; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${event.type}, ${event.name}, ${time(event.ts)}`}
-      style={({ pressed }) => [styles.eventTile, pressed && styles.pressed]}
-    >
-      <View style={styles.eventIcon}>
-        <Ionicons name="pulse-outline" size={18} color="#C46E45" />
-      </View>
-      <Text style={styles.eventType} numberOfLines={2}>
-        {event.type || "Händelse"}
-      </Text>
-      <Text style={styles.eventTime}>{time(event.ts)}</Text>
-      <Text style={styles.eventPlace} numberOfLines={1}>
-        {event.location?.name || event.name || "Område"}
-      </Text>
-    </Pressable>
-  );
-}
-
 export function Dashboard(props: Props) {
+  const [mapTouch,setMapTouch]=useState(false);
+  const {fontScale,height:useHeight} = useWindowDimensions();
   const {
     screen,
     topInset,
     bottomInset,
     events,
     areas,
+    allAreas,
+    policeAreaYear,
+    mapItems,
+    region,
     nearby,
     statsEvents,
     weather,
@@ -201,43 +213,41 @@ export function Dashboard(props: Props) {
     notice,
     onRefresh,
     onLocate,
+    locate,
     go,
     openSource,
     onRouteTo,
+    initialDestination,
+    onRouteResult,
   } = props;
   const urgent = crisis?.vmas || [];
   const notices = crisis?.notices || [];
   const weatherItems = weather?.items || [];
-  const alertCount = urgent.length + notices.length + weatherItems.length;
-  const newsItems = [...(news?.items || []), ...(zoneNews?.items || [])].sort(
-    (a, b) => Date.parse(b.publishedAt || "") - Date.parse(a.publishedAt || ""),
-  );
+  const newsItems = stableNews([...(props.pressNews?.items || []), ...(news?.items || []), ...(zoneNews?.items || [])]);
+  const leadNews = newsItems.find(item=>item.imageUrl)||newsItems[0];
+  const homeNews = leadNews ? [leadNews,...newsItems.filter(item=>item.id!==leadNews.id)].slice(0,6) : [];
+  const scroll = useRef<ScrollView>(null);
+  useEffect(() => { scroll.current?.scrollTo({y:0,animated:false}); }, [screen]);
   const isHome = screen === "home";
-  const [lastMessage, setLastMessage] = useState<FamilyMessage | null>(null);
-  useEffect(() => {
-    if (!isHome) return;
-    let active = true;
-    familyToken()
-      .then((token) =>
-        token ? familyRequest<{ messages: FamilyMessage[] }>("messages") : null,
-      )
-      .then((result) => {
-        if (active) setLastMessage(result?.messages.at(-1) || null);
-      })
-      .catch(() => {
-        if (active) setLastMessage(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [isHome]);
+  const [search,setSearch]=useState("");
+  const [placeOpen,setPlaceOpen]=useState(false);
+  const origin=props.position||null;
+  const homeRegion=origin?neighborhoodRegion(origin):region;
+  const homeMapEvents=recentHomeEvents(statsEvents);
+  const homeEvents=latestNearbyEvents(homeMapEvents,origin||{lat:region.latitude,lon:region.longitude},35,homeMapEvents.length);
+  const locating=props.locationStatus==='loading';
   return (
-    <View style={styles.page}>
+    <KeyboardAvoidingView style={[styles.page,isHome&&{backgroundColor:'#EDF3FA'}]} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <ScrollView
+        scrollEnabled={!mapTouch}
+        ref={scroll}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.content,
-          { paddingTop: topInset + 16, paddingBottom: bottomInset + 108 },
+          { paddingTop: topInset + (isHome ? 6 : 16), paddingBottom: bottomInset + 104 },
         ]}
         refreshControl={
           <RefreshControl
@@ -247,171 +257,43 @@ export function Dashboard(props: Props) {
           />
         }
       >
-        <View style={styles.topRow}>
-          <Pressable
-            style={styles.brand}
-            onPress={() => go("home")}
-            accessibilityRole="button"
-            accessibilityLabel="Till startsidan"
-          >
-            <View style={styles.brandMark}>
-              <Ionicons name="shield-checkmark" size={20} color="#fff" />
-            </View>
-            <Text style={styles.brandText}>TryggPuls</Text>
-          </Pressable>
-          <Pressable
-            style={styles.avatar}
-            onPress={() => go("info")}
-            accessibilityRole="button"
-            accessibilityLabel="Information och profil"
-          >
-            <Ionicons name="person-outline" size={21} color={navy} />
-          </Pressable>
-        </View>
+        {!(placeOpen&&(screen==="places"||screen==="history"))&&<AppHeader
+          onBack={isHome||["family","stats","places","info"].includes(screen)?undefined:props.onBack}
+          onBrand={isHome?undefined:()=>go("home")}
+          right={screen==="stats"?"notifications-outline":screen==="family"?"settings-outline":undefined}
+          rightLabel={screen==="stats"?"Varningar och meddelanden":"Konto och inställningar"}
+          onRight={screen==="stats"?()=>go("alerts"):()=>go("account")}
+        />}
 
         {isHome ? (
           <>
-            <Text style={styles.eyebrow}>HEM · DIN ÖVERBLICK</Text>
-            <Text style={styles.heading}>Det viktigaste, på ett ställe.</Text>
-            <Text style={styles.intro}>
-              Se aktuella källor och ta dig snabbt vidare.
-            </Text>
-            <Pressable
-              style={styles.location}
-              onPress={onLocate}
-              accessibilityRole="button"
-            >
-              <Ionicons name="location-outline" size={17} color={blue} />
-              <Text style={styles.locationText}>
-                {hasLocation
-                  ? "Visar nära din plats"
-                  : "Visar kring kartans mitt · välj min plats"}
-              </Text>
-              <Ionicons name="chevron-forward" size={16} color={blue} />
-            </Pressable>
+            <SearchBar reference value={search} onChangeText={setSearch} placeholder="Vart vill du gå?" onSubmit={()=>{if(search.trim())onRouteTo(search.trim());}} onFilter={()=>go('map')} filterLabel="Öppna karta och filter"/>
+            <FamilyStrip onOpen={()=>go('family')} onAlarm={()=>go('alarm')}/>
             {!!notice && <Text style={styles.notice}>{notice}</Text>}
-            <SectionTitle title="Snabböversikt" />
-            <View style={styles.actions}>
-              <ActionTile
-                icon="notifications-outline"
-                label="Varningar"
-                detail={
-                  crisis || weather
-                    ? `${alertCount} i flödena · ${urgent[0]?.title || weatherItems[0]?.title || "Se läget"}`
-                    : "Hämtar…"
-                }
-                tint="#FFE9E1"
-                onPress={() => go("alerts")}
-              />
-              <ActionTile
-                icon="people-outline"
-                label="Familj"
-                detail="Karta, medlemmar & chatt"
-                tint="#E9E9FF"
-                onPress={() => go("family")}
-              />
-              <ActionTile
-                icon="newspaper-outline"
-                label="Viktiga nyheter"
-                detail={
-                  news || zoneNews
-                    ? `${newsItems.length} i flödet · ${newsItems[0]?.title || "Se uppdateringar"}`
-                    : "Hämtar…"
-                }
-                tint="#E2F3F0"
-                onPress={() => go("news")}
-              />
+            <View style={{marginHorizontal:-14}}><OverviewMap region={homeRegion} events={homeMapEvents} position={origin} route={props.plannedRoute} onOpenEvent={event=>openSource(event.url)} onOpenPlace={onRouteTo} onEditPlaces={()=>go('info')} onLocate={onLocate} onInteraction={setMapTouch} height={Math.round(Math.min(280,Math.max(220,useHeight*.31)))}/></View>
+            {!origin&&<Pressable accessibilityRole="button" accessibilityState={{disabled:locating,busy:locating}} disabled={locating} onPress={()=>{if(props.locationStatus==='denied')void Linking.openSettings().catch(()=>{});else onLocate();}} style={{flexDirection:'row',alignItems:'center',gap:8,minHeight:44,paddingHorizontal:10,backgroundColor:colors.secondary,borderRadius:7,marginTop:6}}>
+              {locating?<ActivityIndicator size="small" color={blue}/>:<Ionicons name="navigate" size={16} color={blue}/>}
+              <View style={{flex:1}}><Text style={{fontSize:12,fontWeight:'600',color:blue}}>{locating?'Hittar din plats…':props.locationStatus==='denied'?'Tillåt platsåtkomst i inställningarna':props.locationStatus==='error'?'Försök hitta min plats igen':'Visa händelser nära mig'}</Text>
+              <Text style={{fontSize:10,color:muted,marginTop:2}}>{props.locationError||'Kartan visar vald plats tills du tillåter platsåtkomst.'}</Text></View>
+              {!locating&&<Ionicons name="chevron-forward" size={14} color={blue}/>}
+            </Pressable>}
+            <View style={{backgroundColor:'#EDF3FA',borderTopLeftRadius:16,borderTopRightRadius:16,marginTop:origin?-10:0,paddingHorizontal:14,paddingTop:1,marginHorizontal:-14}}>
+            <SectionHeader title={origin?'Händelser nära dig':'Händelser kring kartan'} onPress={()=>go('events')}/>
+            <IncidentTiles reference events={homeEvents} origin={origin} onOpen={event=>openSource(event.url)} onOpenCategory={category=>props.onOpenEvents(category==='traffic'?'traffic-accident':category)} empty={events?`Inga publicerade polisnotiser inom 35 km från ${origin?'din plats':'kartans mitt'} de senaste sju dagarna i hämtade data.`:props.feedErrors.events?'Polisens händelser kunde inte hämtas just nu.':'Hämtar händelser…'}/>
+            {!!props.feedErrors.events&&<Freshness fetchedAt={events?.fetchedAt} error={props.feedErrors.events} refreshing={props.eventsRefreshing}/>}
+            <SectionHeader title="Nyheter" onPress={()=>go('news')}/>
+            {!!homeNews.length&&<ScrollView horizontal showsHorizontalScrollIndicator={false} decelerationRate="fast" snapToInterval={262} snapToAlignment="start" style={{marginHorizontal:-14}} contentContainerStyle={{gap:12,paddingHorizontal:14,paddingBottom:6}}>{homeNews.map(item=><NewsTile key={item.id||item.title} item={item} source={newsSource(item)} onPress={()=>props.onOpenNews(item)}/>)}</ScrollView>}
+            {!newsItems.length&&<Text style={styles.empty}>{news||zoneNews||props.pressNews?'Inga nya artiklar i hämtade flöden.':props.feedErrors.news||props.feedErrors.zoneNews||props.feedErrors.pressNews?'Nyheterna kunde inte hämtas just nu.':'Hämtar nyheter…'}</Text>}
+            {!!props.feedErrors.pressNews&&<Freshness fetchedAt={props.pressNews?.fetchedAt} error={props.feedErrors.pressNews}/>}
+            <SourceDisclosure summary="Om kartan och källorna">
+            <Freshness fetchedAt={events?.fetchedAt} error={props.feedErrors.events} refreshing={props.eventsRefreshing}/>
+            <Freshness fetchedAt={props.pressNews?.fetchedAt} error={props.feedErrors.pressNews}/>
+            <Text style={styles.finePrint}>Kartpunkter är ungefärliga. Rött och gult markerar polisnotiser; grönt visar familjens valda platser. Färgerna bedömer inte områdets trygghet. Myndighetsuppgifter kan vara fördröjda.</Text>
+            </SourceDisclosure>
             </View>
-            <SectionTitle
-              title="Händelser"
-              action="Visa alla"
-              onPress={() => go("events")}
-            />
-            <View style={styles.eventRow}>
-              {nearby.length ? (
-                nearby
-                  .slice(0, 3)
-                  .map((event) => (
-                    <EventTile
-                      key={event.id}
-                      event={event}
-                      onPress={() => openSource(event.url)}
-                    />
-                  ))
-              ) : (
-                <Text style={styles.emptyCard}>
-                  {events
-                    ? "Inga polisnotiser matchar det valda området i tillgängliga data."
-                    : "Polisens händelser kunde inte hämtas just nu."}
-                </Text>
-              )}
-            </View>
-            <SectionTitle title="Chattar" />
-            <Pressable
-              style={styles.chatCard}
-              onPress={() => go("family")}
-              accessibilityRole="button"
-            >
-              <View style={styles.chatIcon}>
-                <Ionicons
-                  name="chatbubbles-outline"
-                  size={21}
-                  color="#675DBA"
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.chatTitle}>
-                  {lastMessage
-                    ? `${lastMessage.sender_name} i familjechatten`
-                    : "Familjechatten"}
-                </Text>
-                <Text style={styles.body}>
-                  {lastMessage
-                    ? lastMessage.body
-                    : "Läs och skicka meddelanden i din familj. Logga in för att se chatten."}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={blue} />
-            </Pressable>
-            <SectionTitle title="Dina sidor" />
-            <View style={styles.actions}>
-              <ActionTile
-                icon="person-outline"
-                label="Profil"
-                detail="Konto och källor"
-                tint="#E7EFF9"
-                onPress={() => go("info")}
-              />
-              <ActionTile
-                icon="people-outline"
-                label="Familj"
-                detail="Medlemmar & zoner"
-                tint="#E9E9FF"
-                onPress={() => go("family")}
-              />
-              <ActionTile
-                icon="stats-chart-outline"
-                label="Statistik"
-                detail="BRÅ och polisnotiser"
-                tint="#E2F3F0"
-                onPress={() => go("stats")}
-              />
-            </View>
-            <Text style={styles.finePrint}>
-              Uppgifter från myndighetskällor kan vara fördröjda. En tom lista
-              är ingen säkerhetsgaranti.
-            </Text>
           </>
         ) : (
           <>
-            <Pressable
-              style={styles.back}
-              onPress={() => go("home")}
-              accessibilityRole="button"
-            >
-              <Ionicons name="chevron-back" size={18} color={blue} />
-              <Text style={styles.backText}>Hem</Text>
-            </Pressable>
             {screen === "alerts" && (
               <>
                 <Text style={styles.eyebrow}>MYNDIGHETSFLÖDEN</Text>
@@ -420,6 +302,7 @@ export function Dashboard(props: Props) {
                   VMA, Krisinformation och SMHI för hela Sverige. Kontrollera
                   alltid berört område och giltighet i originalkällan.
                 </Text>
+                <Freshness fetchedAt={crisis?.fetchedAt} error={props.feedErrors.crisis}/><Freshness fetchedAt={weather?.fetchedAt} error={props.feedErrors.weather}/>
                 <SectionTitle
                   title={`VMA ${urgent.length ? `· ${urgent.length}` : ""}`}
                 />
@@ -485,9 +368,8 @@ export function Dashboard(props: Props) {
                 <Text style={styles.eyebrow}>VIKTIGA NYHETER</Text>
                 <Text style={styles.heading}>Senaste uppdateringarna</Text>
                 <Text style={styles.intro}>
-                  Publiceringar från Krisinformation och Polisens nyheter om
-                  säkerhetszoner. En nyhetsartikel betyder inte att en zon är
-                  aktiv.
+                  Nyheter från Aftonbladet, Expressen, Krisinformation och
+                  Polisen. Läs hela artikeln hos källan.
                 </Text>
                 {newsItems.length ? (
                   newsItems
@@ -496,11 +378,7 @@ export function Dashboard(props: Props) {
                       <BulletinCard
                         key={item.id || `${item.title}-${i}`}
                         item={item}
-                        label={
-                          item.url
-                            ? "POLISEN · SÄKERHETSZON"
-                            : "KRISINFORMATION"
-                        }
+                        label={newsSource(item)}
                         tone="blue"
                         onPress={() => openSource(item.url || item.source)}
                       />
@@ -520,234 +398,32 @@ export function Dashboard(props: Props) {
                 openSource={openSource}
               />
             )}
+            {screen === "journey" && <RouteExploreScreen events={events} areas={allAreas} items={mapItems} initialTo={initialDestination} locate={locate} openSource={openSource} onExpand={onRouteResult} />}
+            {(screen === "history"||screen === "places") && <PlaceHistoryScreen events={events} areas={allAreas} policeAreaYear={policeAreaYear} items={mapItems} openSource={openSource} onOpenStats={props.onOpenStats} onEditPlaces={()=>go("info")} onDetailChange={setPlaceOpen} />}
+            {screen === "alarm" && <FamilyAlarmScreen onOpenFamily={() => go("family")} />}
             {screen === "stats" && (
-              <StatsScreen nearby={statsEvents} areas={areas} />
+              <StatsScreen initialMunicipality={props.statsMunicipality} nearby={statsEvents} areas={areas} eventsResponse={events} centerLabel={hasLocation?"din plats":"kartans mitt"} />
             )}
             {screen === "info" && (
               <>
-                <ProfileScreen onRouteTo={onRouteTo} />
+                <ProfileScreen onRouteTo={onRouteTo} onOpenAdmin={() => go("admin")} />
                 <SectionTitle title="Datakällor" />
                 <Text style={styles.body}>
                   Polisnotiser, BRÅ, SMHI och Krisinformation hämtas från
-                  TryggPuls server. Publicerade uppgifter kan vara fördröjda och
+                  Cajklops server. Publicerade uppgifter kan vara fördröjda och
                   kartpunkter ungefärliga.
                 </Text>
+                <SectionTitle title="Fler funktioner"/>
+                <View style={[styles.actions,fontScale>1.3&&{flexWrap:"wrap"}]}><ActionTile icon="person-outline" label="Mitt konto" detail="E-post och aviseringar" tint="#E7EFF9" onPress={()=>go('account')}/><ActionTile icon="chatbubbles-outline" label="Rapporter" detail="Obekräftade observationer" tint="#E9E9FF" onPress={()=>go('community')}/><ActionTile icon="notifications-outline" label="Familjelarm" detail="Be familjen om hjälp" tint="#FFE9E1" onPress={()=>go('alarm')}/></View>
+                <View style={[styles.actions,fontScale>1.3&&{flexWrap:"wrap"}]}><ActionTile icon="navigate-outline" label="Utforska rutt" detail="Notiser och service" tint="#E7EFF9" onPress={()=>go('journey')}/><ActionTile icon="time-outline" label="Platshistorik" detail="Plats och statistik" tint="#E2F3F0" onPress={()=>go('history')}/><ActionTile icon="add-circle-outline" label="Rapportera" detail="Publicera en observation" tint="#E9E9FF" onPress={()=>go('compose')}/></View>
               </>
+            )}
+            {screen === "admin" && (
+              <AdminMapItemsScreen onBack={() => go("info")} onPublished={onRefresh} />
             )}
           </>
         )}
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
-
-const styles = StyleSheet.create({
-  page: { ...StyleSheet.absoluteFill, backgroundColor: "#F4F7FC" },
-  content: { paddingHorizontal: 20 },
-  topRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  },
-  brand: { flexDirection: "row", alignItems: "center", gap: 9 },
-  brandMark: {
-    height: 37,
-    width: 37,
-    borderRadius: 12,
-    backgroundColor: blue,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  brandText: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: navy,
-    letterSpacing: -0.5,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 15,
-    backgroundColor: "#EAF0F8",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  eyebrow: { fontSize: 10, fontWeight: "800", color: blue, letterSpacing: 1.8 },
-  heading: {
-    color: navy,
-    fontSize: 25,
-    lineHeight: 29,
-    fontWeight: "800",
-    letterSpacing: -0.8,
-    marginTop: 8,
-  },
-  intro: {
-    color: muted,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 5,
-    marginBottom: 10,
-  },
-  location: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    alignSelf: "flex-start",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: "#E8F2FF",
-    borderRadius: 16,
-    marginBottom: 13,
-  },
-  locationText: { color: blue, fontWeight: "700", fontSize: 12 },
-  notice: {
-    color: "#9D5E20",
-    backgroundColor: "#FFF1DA",
-    borderRadius: 12,
-    overflow: "hidden",
-    padding: 10,
-    fontSize: 12,
-    marginBottom: 14,
-  },
-  sectionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 9,
-    marginTop: 2,
-  },
-  sectionTitle: {
-    color: navy,
-    fontSize: 17,
-    fontWeight: "800",
-    letterSpacing: -0.4,
-  },
-  sectionAction: { color: blue, fontSize: 12, fontWeight: "800" },
-  actions: { flexDirection: "row", gap: 8, marginBottom: 17 },
-  actionTile: {
-    flex: 1,
-    minHeight: 100,
-    borderRadius: 18,
-    backgroundColor: "#fff",
-    padding: 10,
-    borderWidth: 1,
-    borderColor: "#E7EDF5",
-  },
-  pressed: { opacity: 0.76, transform: [{ scale: 0.99 }] },
-  tileIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 7,
-  },
-  tileLabel: { color: navy, fontSize: 11, fontWeight: "800" },
-  tileDetail: { color: muted, fontSize: 10, lineHeight: 13, marginTop: 3 },
-  eventRow: { flexDirection: "row", gap: 8, marginBottom: 17 },
-  eventTile: {
-    flex: 1,
-    minHeight: 108,
-    borderRadius: 17,
-    padding: 10,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#E7EDF5",
-  },
-  eventIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
-    backgroundColor: "#FFF0E8",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 7,
-  },
-  eventType: { color: navy, fontSize: 11, fontWeight: "800", lineHeight: 14 },
-  eventTime: {
-    color: "#A4623E",
-    fontSize: 10,
-    fontWeight: "700",
-    marginTop: 4,
-  },
-  eventPlace: { color: muted, fontSize: 9, marginTop: 4 },
-  emptyCard: {
-    flex: 1,
-    color: muted,
-    backgroundColor: "#fff",
-    borderRadius: 17,
-    padding: 15,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  chatCard: {
-    flexDirection: "row",
-    gap: 11,
-    alignItems: "center",
-    padding: 12,
-    backgroundColor: "#fff",
-    borderRadius: 17,
-    borderWidth: 1,
-    borderColor: "#E7EDF5",
-    marginBottom: 17,
-  },
-  chatIcon: {
-    width: 37,
-    height: 37,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#EDEBFF",
-  },
-  chatTitle: { color: navy, fontSize: 12, fontWeight: "800" },
-  body: { color: muted, fontSize: 12, lineHeight: 18, marginTop: 4 },
-  meta: { color: "#8494A7", fontSize: 10, marginTop: 6 },
-  empty: { color: muted, fontSize: 12, lineHeight: 18, paddingVertical: 15 },
-  finePrint: { color: "#7D8DA2", fontSize: 10, lineHeight: 15, marginTop: 1 },
-  back: {
-    flexDirection: "row",
-    alignItems: "center",
-    alignSelf: "flex-start",
-    marginBottom: 19,
-    gap: 3,
-  },
-  backText: { color: blue, fontWeight: "700", fontSize: 14 },
-  bulletin: {
-    flexDirection: "row",
-    gap: 12,
-    padding: 15,
-    borderRadius: 19,
-    backgroundColor: "#fff",
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E8EDF5",
-  },
-  bulletinRule: { width: 4, borderRadius: 4 },
-  bulletinTitle: { color: navy, fontSize: 14, fontWeight: "800", marginTop: 5 },
-  familyHero: {
-    borderRadius: 24,
-    padding: 21,
-    backgroundColor: "#EEEFFF",
-    gap: 8,
-  },
-  familyTitle: { color: navy, fontSize: 21, fontWeight: "800" },
-  familyButton: {
-    alignSelf: "flex-start",
-    backgroundColor: blue,
-    borderRadius: 13,
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    marginTop: 10,
-  },
-  familyButtonText: { color: "#fff", fontSize: 13, fontWeight: "800" },
-  familyNote: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "flex-start",
-    backgroundColor: "#EAF3FF",
-    padding: 15,
-    borderRadius: 17,
-    marginTop: 15,
-  },
-});

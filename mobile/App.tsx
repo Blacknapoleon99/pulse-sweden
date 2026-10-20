@@ -1,26 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import {
-  AccessibilityInfo,
-  ActivityIndicator,
-  Animated,
-  Linking,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Text, TextInput } from './src/Typography';
+import { useEffect, useRef, useState, type ComponentType } from "react";
+import { AccessibilityInfo, ActivityIndicator, Animated, Linking, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { StatusBar } from "expo-status-bar";
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { BlurView } from "expo-blur";
-import * as Location from "expo-location";
 import MapView, {
   Marker,
   Polygon,
   Polyline,
-  type Region,
 } from "react-native-maps";
 import {
   SafeAreaProvider,
@@ -30,63 +17,66 @@ import {
   API_BASE,
   calculateRoute,
   geocode,
-  getJson,
   refreshRoute,
   type AreasResponse,
   type CrisisResponse,
-  type Event,
   type EventsResponse,
-  type Feature,
   type FeedResponse,
-  type Point,
+  type MapItemsResponse,
   type RouteResponse,
   type ZonesResponse,
 } from "./src/api";
 import { Dashboard, type Destination } from "./src/Dashboard";
+import { FamilyProvider } from "./src/FamilyState";
+import {useFamily} from './src/FamilyState';
+import {positionFresh} from './src/mobileState';
+import { polygonParts, validAt, destinationOnly, eventPoint, km } from "./src/mobileState";
+import { MapLegend } from "./src/MapPreview";
+import { AlarmCoordinator } from "./src/FamilyAlarmScreen";
+import { NavigationContainer, createNavigationContainerRef, useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
+import { AppDataProvider, useAppData, useFeedInterest } from './src/AppData';
+import { CommunityMarkers } from './src/CommunityMarkers';
+import type { CommunityPage } from './src/communityApi';
+import { CommunityScreen } from './src/CommunityScreen';
+import { ComposeReportScreen } from './src/ComposeReportScreen';
+import { ReportDetailScreen } from './src/ReportDetailScreen';
+import { AccountScreen } from './src/AccountScreen';
+import { NewsScreen, NewsDetailScreen } from './src/NewsScreen';
+import { PolicyScreen, BlockedUsersScreen } from './src/PolicyScreen';
+import { EventsScreen } from './src/EventsScreen';
+import type { RootStackParams,PrototypeTabParams } from './src/navigation';
+import * as Notifications from 'expo-notifications';
+import * as Sentry from '@sentry/react-native';
+import Constants from 'expo-constants';
+import { useMapCommunity } from './src/useMapCommunity';
+import { useVisibleClock } from './src/useVisibleClock';
+import {PrototypeTabs,PrototypeFeatureFrame,isPrototypeTab,openPrototypeTab} from './src/PrototypeChrome';
+import {prototypeMapStyles as s} from './src/PrototypeMapStyles';
+import {prototypeTabAction} from './src/prototypeNavigation';
+import { TryggPulseBrand } from './src/CajklopsBrand';
+import {useFonts} from 'expo-font';
+import {interfaceFonts} from './src/Typography';
+import {referenceMapStyle} from './src/referenceMapStyle';
+import {IncidentHeat,PlaceLabel} from './src/ReferenceKit';
+import {neighborhoodRegion} from './src/homeMapState';
+import {FamilyMapScreen} from './src/FamilyMapScreen';
+import {familyMapStyle} from './src/FamilyMapDetails';
+
+if (process.env.EXPO_PUBLIC_SENTRY_DSN) Sentry.init({dsn:process.env.EXPO_PUBLIC_SENTRY_DSN,sendDefaultPii:false,enableNative:Constants.appOwnership!=='expo',beforeSend(event){delete event.user;delete event.request;delete event.breadcrumbs;delete event.extra;return event;}});
+const Stack = createNativeStackNavigator<RootStackParams>();
+const Tabs=createBottomTabNavigator<PrototypeTabParams>();
+const navigationRef = createNavigationContainerRef<RootStackParams>();
+function featureFrame<P extends object>(Screen:ComponentType<P>){return (props:P)=><PrototypeFeatureFrame><Screen {...props}/></PrototypeFeatureFrame>;}
+const FramedAccount=featureFrame(AccountScreen),FramedCommunity=featureFrame(CommunityScreen),FramedCompose=featureFrame(ComposeReportScreen),FramedReport=featureFrame(ReportDetailScreen),FramedNewsDetail=featureFrame(NewsDetailScreen),FramedPolicy=featureFrame(PolicyScreen),FramedBlocks=featureFrame(BlockedUsersScreen);
+function PrototypeMain(){return <Tabs.Navigator initialRouteName="home" screenOptions={{headerShown:false,freezeOnBlur:true,animation:'none'}} tabBar={props=><PrototypeTabs {...props}/>}><Tabs.Screen name="home" component={AppScreen}/><Tabs.Screen name="map" component={AppScreen}/><Tabs.Screen name="stats" component={AppScreen}/><Tabs.Screen name="places" component={AppScreen}/><Tabs.Screen name="info" component={AppScreen}/></Tabs.Navigator>;}
 
 type Tab = Destination;
-const START: Region = {
-  latitude: 59.3293,
-  longitude: 18.0686,
-  latitudeDelta: 0.14,
-  longitudeDelta: 0.14,
-};
-const blue = "#176FE1",
-  ink = "#142A43",
+const blue = "#2187F5",
+  ink = "#11152A",
   muted = "#607287";
 const toMap = ([lon, lat]: number[]) => ({ latitude: lat, longitude: lon });
-function polygonRings(feature: Feature) {
-  const polygons =
-    feature.geometry.type === "Polygon"
-      ? [feature.geometry.coordinates as number[][][]]
-      : (feature.geometry.coordinates as number[][][][]);
-  return polygons.map((p) => (p[0] || []).map(toMap));
-}
-function eventPoint(event: Event) {
-  const gps = event.location?.gps;
-  return gps && Number.isFinite(gps[0]) && Number.isFinite(gps[1])
-    ? { latitude: gps[0], longitude: gps[1] }
-    : null;
-}
-function km(
-  a: { latitude: number; longitude: number },
-  b: { latitude: number; longitude: number },
-) {
-  const rad = Math.PI / 180,
-    dLat = (a.latitude - b.latitude) * rad,
-    dLon = (a.longitude - b.longitude) * rad;
-  return (
-    12742 *
-    Math.asin(
-      Math.sqrt(
-        Math.sin(dLat / 2) ** 2 +
-          Math.cos(a.latitude * rad) *
-            Math.cos(b.latitude * rad) *
-            Math.sin(dLon / 2) ** 2,
-      ),
-    )
-  );
-}
 function Source({ label, status }: { label: string; status?: string }) {
   return (
     <View style={s.source}>
@@ -113,35 +103,42 @@ function AppScreen() {
   const inset = useSafeAreaInsets(),
     map = useRef<MapView>(null),
     fade = useRef(new Animated.Value(1)).current;
-  const [reduceMotion, setReduceMotion] = useState(false),
-    [tab, setTab] = useState<Tab>("home");
-  const [region, setRegion] = useState(START),
-    [position, setPosition] = useState<Point | null>(null);
-  const [events, setEvents] = useState<EventsResponse | null>(null),
-    [areas, setAreas] = useState<AreasResponse | null>(null),
-    [zones, setZones] = useState<ZonesResponse | null>(null);
-  const [showAreas, setShowAreas] = useState(true),
-    [showEvents, setShowEvents] = useState(true);
-  const [weather, setWeather] = useState<FeedResponse | null>(null),
-    [crisis, setCrisis] = useState<CrisisResponse | null>(null),
-    [news, setNews] = useState<FeedResponse | null>(null),
-    [zoneNews, setZoneNews] = useState<FeedResponse | null>(null);
-  const [loading, setLoading] = useState(false),
-    [message, setMessage] = useState("");
-  const [from, setFrom] = useState("Stockholm central"),
-    [to, setTo] = useState("Gamla stan, Stockholm");
-  const [gpsStart, setGpsStart] = useState(false),
-    [mode, setMode] = useState<"walking" | "driving">("walking");
-  const [route, setRoute] = useState<RouteResponse | null>(null),
-    [routeBusy, setRouteBusy] = useState(false);
+  const navigation = useNavigation<any>(), screenRoute=useRoute(),tab = screenRoute.name as Tab;
+  const {height}=useWindowDimensions(),mapPanelHeight=Math.min(260,height*.34);
+  const focused=useIsFocused(),[legendOpen,setLegendOpen]=useState(false);
+  const data = useAppData(),family=useFamily();
+  const [showFamily,setShowFamily]=useState(true);
+  const [mapExpanded,setMapExpanded]=useState(false);
+  useFeedInterest(tab === 'home' ? ['events','areas','zones','mapItems','weather','crisis','news','zoneNews','pressNews','community'] : tab === 'alerts' ? ['weather','crisis'] : ['events','areas','zones','mapItems','community'], tab === 'home' ? ['events'] : []);
+  const { region,setRegion,position,route,setRoute,destination:initialDestination,setDestination:setInitialDestination } = data;
+  useEffect(()=>{if(focused)map.current?.animateToRegion(region,0);},[focused]);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const events = data.feeds.events.data as EventsResponse|null, areas = data.feeds.areas.data as AreasResponse|null, zones = data.feeds.zones.data as ZonesResponse|null, mapItems = data.feeds.mapItems.data as MapItemsResponse|null;
+  const {showAreas,setShowAreas,showEvents,setShowEvents,showCommunity,setShowCommunity}=data;
+  const weather = data.feeds.weather.data as FeedResponse|null, crisis = data.feeds.crisis.data as CrisisResponse|null, news = data.feeds.news.data as FeedResponse|null, zoneNews = data.feeds.zoneNews.data as FeedResponse|null;
+  const communityReports = (data.feeds.community.data as CommunityPage|null)?.items || [];
+  const mapCommunity=useMapCommunity(region,tab==='map'&&mapExpanded&&showCommunity);
+  const loading = Object.values(data.feeds).some(entry=>entry.loading);
+  const [message, setMessage] = useState("");
+  const {routeFrom:from,setRouteFrom:setFrom,routeTo:to,setRouteTo:setTo,routeGps:gpsStart,setRouteGps:setGpsStart,routeMode:mode,setRouteMode:setMode}=data;
+  const [routeBusy, setRouteBusy] = useState(false);
+  const clock = useVisibleClock(30_000);
+  const mapReady=useRef(false);
+  function fitPendingRoute(){
+    if(tab==='map'&&data.routeFitId)setMapExpanded(true);
+    if(tab!=='map'||!mapReady.current||!map.current||!data.routeFitId||data.routeFitId!==route?.routeId)return;
+    const path=route.geometry.coordinates.map(toMap);
+    if(path.length>1)map.current.fitToCoordinates(path,{edgePadding:{top:110,right:35,bottom:205,left:35},animated:!reduceMotion});
+    data.setRouteFitId(null);
+  }
+  useEffect(fitPendingRoute,[tab,data.routeFitId,route?.routeId]);
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled()
       .then(setReduceMotion)
       .catch(() => {});
-    reload();
   }, []);
   function changeTab(next: Tab) {
-    setTab(next);
+    if (isPrototypeTab(next)) openPrototypeTab(navigation,next); else navigation.navigate(next);
     if (!reduceMotion) {
       fade.setValue(0);
       Animated.timing(fade, {
@@ -152,59 +149,14 @@ function AppScreen() {
     }
   }
   async function reload() {
-    setLoading(true);
     setMessage("");
-    const results = await Promise.allSettled([
-      getJson<EventsResponse>("/api/events"),
-      getJson<AreasResponse>("/api/police-areas"),
-      getJson<ZonesResponse>("/api/public-zones"),
-      getJson<FeedResponse>("/api/weather-warnings"),
-      getJson<CrisisResponse>("/api/crisis-updates"),
-      getJson<FeedResponse>("/api/crisis-news"),
-      getJson<FeedResponse>("/api/security-zone-news"),
-    ]);
-    if (results[0].status === "fulfilled") setEvents(results[0].value);
-    if (results[1].status === "fulfilled") setAreas(results[1].value);
-    if (results[2].status === "fulfilled") setZones(results[2].value);
-    if (results[3].status === "fulfilled") setWeather(results[3].value);
-    if (results[4].status === "fulfilled") setCrisis(results[4].value);
-    if (results[5].status === "fulfilled") setNews(results[5].value);
-    if (results[6].status === "fulfilled") setZoneNews(results[6].value);
-    if (results.some((r) => r.status === "rejected"))
-      setMessage(
-        "Några källor kunde inte hämtas. Tryck på uppdatera för att försöka igen.",
-      );
-    setLoading(false);
+    await data.refresh();
   }
   async function locate() {
     setMessage("");
-    try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (permission.status !== "granted")
-        throw new Error(
-          "Platsåtkomst nekades. Du kan fortfarande använda kartan och söka adresser.",
-        );
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      const point = { lat: loc.coords.latitude, lon: loc.coords.longitude };
-      setPosition(point);
-      map.current?.animateToRegion(
-        {
-          latitude: point.lat,
-          longitude: point.lon,
-          latitudeDelta: 0.08,
-          longitudeDelta: 0.08,
-        },
-        400,
-      );
-      return point;
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Positionen kunde inte läsas.",
-      );
-      return null;
-    }
+    const point=await data.locate();
+    if(point)map.current?.animateToRegion(neighborhoodRegion(point),reduceMotion?0:400);
+    return point;
   }
   async function analyze(refresh = false) {
     setRouteBusy(true);
@@ -217,7 +169,7 @@ function AppScreen() {
           throw new Error("Ange start och mål.");
         const [start, destination] = await Promise.all([
           gpsStart
-            ? position
+            ? position&&data.positionCheckedAt&&Date.now()-data.positionCheckedAt<5*60_000
               ? Promise.resolve(position)
               : locate()
             : geocode(from).then((data) => data.results[0]),
@@ -232,15 +184,8 @@ function AppScreen() {
       setRoute(result);
       const path = result.geometry.coordinates.map(toMap);
       if (path.length > 1) {
+        data.setRouteFitId(result.routeId);
         changeTab("map");
-        setTimeout(
-          () =>
-            map.current?.fitToCoordinates(path, {
-              edgePadding: { top: 160, right: 40, bottom: 270, left: 40 },
-              animated: true,
-            }),
-          300,
-        );
       }
     } catch (error) {
       setMessage(
@@ -271,12 +216,16 @@ function AppScreen() {
   const nearby = nearbyAll.slice(0, 12);
   const visibleAreas = [...(areas?.features || []), ...(zones?.features || [])]
     .filter((f) => {
-      const first = polygonRings(f)[0]?.[0];
+      const first = polygonParts(f)[0]?.coordinates[0];
       return (
-        first && km(center, first) < Math.max(60, region.latitudeDelta * 180)
+        validAt(f.properties, clock) && first && km(center, first) < Math.max(60, region.latitudeDelta * 180)
       );
     })
     .slice(0, 80);
+  const visibleMapItems = (mapItems?.features || []).filter((item) => {
+    const [lon, lat] = item.geometry.coordinates;
+    return validAt(item.properties, clock) && km(center, { latitude: lat, longitude: lon }) < Math.max(60, region.latitudeDelta * 180);
+  }).slice(0, 100);
   const open = (url?: string) => {
     if (url?.startsWith("https://")) Linking.openURL(url).catch(() => {});
   };
@@ -290,27 +239,35 @@ function AppScreen() {
       <Text style={[s.chipText, active && s.chipTextOn]}>{label}</Text>
     </Pressable>
   );
+  if(tab==='map'&&!mapExpanded)return <View style={{flex:1}}><StatusBar style="dark"/><FamilyMapScreen region={region} position={position} events={events?.events||[]} route={route} topInset={inset.top} bottomInset={inset.bottom} refreshing={data.feeds.events.loading} onRefresh={()=>void reload()} onOpenFamily={()=>changeTab('family')} onExpand={()=>setMapExpanded(true)} onLocate={()=>void locate()} openSource={open} onEditPlaces={()=>changeTab('info')}/></View>;
   return (
     <View style={s.root}>
       <StatusBar style="dark" />
-      <MapView
+      {(['map','events','route'] as Tab[]).includes(tab) && <MapView
         ref={map}
         style={StyleSheet.absoluteFill}
-        initialRegion={START}
+        initialRegion={region}
+        customMapStyle={tab==='map'?familyMapStyle:referenceMapStyle}
+        userInterfaceStyle={tab==='map'?'light':undefined}
+        onMapReady={()=>{mapReady.current=true;fitPendingRoute();}}
         onRegionChangeComplete={setRegion}
         showsUserLocation={!!position}
       >
+        {showFamily&&(family.overview?.members||[]).filter(member=>member.sharing&&positionFresh(member,family.clock)).map(member=><Marker key={`family-${member.id}`} coordinate={{latitude:member.lat!,longitude:member.lon!}} title={member.display_name} description="Frivilligt delad familjeplats" pinColor={blue}/>)}
+        {showFamily&&(family.overview?.zones||[]).map(zone=><Marker key={`family-zone-${zone.id}`} coordinate={{latitude:zone.lat,longitude:zone.lon}} title={zone.name} description="Familjens valda plats" tracksViewChanges={false}><PlaceLabel name={zone.name} kind={zone.kind}/></Marker>)}
+        {showCommunity && <CommunityMarkers reports={mapCommunity.items} region={region} onOpen={id=>navigation.navigate('report',{id})} onZoom={next=>map.current?.animateToRegion(next,250)}/>}
         {showAreas &&
           visibleAreas.flatMap((f) =>
-            polygonRings(f).map((ring, i) =>
-              ring.length > 2 ? (
+            polygonParts(f).map((part, i) =>
+              part.coordinates.length > 2 ? (
                 <Polygon
                   key={`${f.id || f.properties.name}-${i}`}
-                  coordinates={ring}
+                  coordinates={part.coordinates}
+                  holes={part.holes}
                   strokeColor={
                     f.properties.kind === "security-zone"
                       ? "#D86B42"
-                      : "#675BBB"
+                      : f.properties.kind === "organized-crime-area" ? "#B05277" : "#675BBB"
                   }
                   fillColor={
                     f.properties.kind === "security-zone"
@@ -322,22 +279,18 @@ function AppScreen() {
               ) : null,
             ),
           )}
-        {showEvents &&
-          visibleEvents.map((event) => {
-            const p = eventPoint(event);
-            return (
-              p && (
-                <Marker
-                  key={event.id}
-                  coordinate={p}
-                  title={`${event.type} · ${event.name}`}
-                  description="Ungefärlig områdespunkt"
-                  pinColor="#DC8654"
-                  onCalloutPress={() => open(event.url)}
-                />
-              )
-            );
-          })}
+        {showEvents&&<IncidentHeat events={destinationOnly(visibleEvents,route?.incidentsNearRoute||[])} onOpen={event=>open(event.url)}/>}
+        {visibleMapItems.map((item) => (
+          <Marker
+            key={`admin-map-item-${item.id}`}
+            coordinate={{ latitude: item.geometry.coordinates[1], longitude: item.geometry.coordinates[0] }}
+            title={item.properties.title}
+            description={`Cajklops-granskad kartpost · kontrollera källan. Gäller till ${new Date(item.properties.validTo).toLocaleDateString("sv-SE")}`}
+            pinColor="#258A77"
+            onCalloutPress={() => open(item.properties.sourceUrl)}
+          />
+        ))}
+        {route?.incidentsNearRoute?.map(event => { const point = eventPoint(event); return point ? <Marker key={"route-" + event.id} coordinate={point} title={"Längs rutten · " + event.type} description="Ungefärlig områdespunkt" pinColor="#5634A5" onCalloutPress={() => open(event.url)}/> : null; })}
         {route?.geometry?.coordinates?.length && (
           <Polyline
             coordinates={route.geometry.coordinates.map(toMap)}
@@ -345,36 +298,63 @@ function AppScreen() {
             strokeWidth={5}
           />
         )}
-      </MapView>
+      </MapView>}
       {(
-        ["home", "alerts", "news", "family", "stats", "info"] as Tab[]
+        ["home", "alerts", "news", "family", "journey", "history", "places", "alarm", "stats", "info", "admin"] as Tab[]
       ).includes(tab) && (
         <Dashboard
           screen={
-            tab as "home" | "alerts" | "news" | "family" | "stats" | "info"
+            tab as "home" | "alerts" | "news" | "family" | "journey" | "history" | "places" | "alarm" | "stats" | "info" | "admin"
           }
           topInset={inset.top}
           bottomInset={inset.bottom}
           events={events}
           areas={visibleAreas}
+          allAreas={[...(areas?.features || []), ...(zones?.features || [])].filter(f => validAt(f.properties, clock))}
+          policeAreaYear={areas?.year}
+          mapItems={(mapItems?.features || []).filter(item => validAt(item.properties, clock))}
+          region={region}
           nearby={nearby}
           statsEvents={nearbyAll}
           weather={weather}
           crisis={crisis}
           news={news}
+          pressNews={data.feeds.pressNews.data as FeedResponse|null}
           zoneNews={zoneNews}
           hasLocation={!!position}
+          position={position}
+          locationStatus={data.locationStatus}
+          locationError={data.locationError}
+          eventsRefreshing={data.feeds.events.loading}
+          plannedRoute={route}
+          positionCheckedAt={data.positionCheckedAt}
+          onOpenEvents={category=>navigation.navigate('events',{category})}
+          onBack={()=>navigation.canGoBack()?navigation.goBack():navigation.popToTop()}
+          onOpenStats={municipality=>navigation.dispatch(prototypeTabAction('stats',{municipality}))}
+          statsMunicipality={(screenRoute.params as RootStackParams['stats'])?.municipality}
           loading={loading}
           notice={message}
+          communityReports={communityReports}
+          feedErrors={Object.fromEntries(Object.entries(data.feeds).map(([key,entry])=>[key,entry.error]))}
+          onOpenReport={id=>navigation.navigate('report',{id})}
+          onOpenNews={item=>navigation.navigate('newsDetail',{item})}
           onRefresh={reload}
           onLocate={() => {
             void locate();
           }}
+          locate={locate}
           go={changeTab}
           openSource={open}
           onRouteTo={(address) => {
-            setTo(address);
+            setInitialDestination(address);
+            data.setRouteTo(address);
             changeTab("route");
+          }}
+          initialDestination={initialDestination}
+          onRouteResult={(result) => {
+            setRoute(result);
+            data.setRouteFitId(result.routeId);
+            changeTab("map");
           }}
         />
       )}
@@ -382,14 +362,11 @@ function AppScreen() {
         <View style={[s.headerWrap, { top: inset.top + 10 }]}>
           <View style={s.glass}>
             <View style={s.header}>
-              <View style={s.logo}>
-                <Ionicons name="shield-checkmark" color="white" size={19} />
-              </View>
+              {tab==='map'&&<Pressable accessibilityRole="button" accessibilityLabel="Till familjeöversikten" hitSlop={10} onPress={()=>setMapExpanded(false)}><Ionicons name="chevron-back" size={22} color={ink}/></Pressable>}
               <View style={{ flex: 1 }}>
-                <Text style={s.brand}>TryggPuls</Text>
-                <Text style={s.kicker}>SVERIGE · MOBIL DEMO</Text>
+                <TryggPulseBrand nameStyle={s.brand}/>
               </View>
-              <Pressable accessibilityLabel="Uppdatera källor" onPress={reload}>
+              <Pressable accessibilityRole="button" hitSlop={11} accessibilityLabel="Uppdatera källor" onPress={reload}>
                 {loading ? (
                   <ActivityIndicator color={blue} />
                 ) : (
@@ -399,11 +376,16 @@ function AppScreen() {
             </View>
           </View>
           {tab === "map" && (
-            <View style={s.chips}>
+            <View style={[s.chips,{flexWrap:'wrap'}]}>
               {chip("Områden", showAreas, () => setShowAreas(!showAreas))}
               {chip("Polisnotiser", showEvents, () =>
                 setShowEvents(!showEvents),
               )}
+              {chip('Användarrapporter',showCommunity,()=>setShowCommunity(!showCommunity))}
+              {chip('Rapportera',false,()=>navigation.navigate('compose'))}
+              {chip('Familj',showFamily,()=>setShowFamily(!showFamily))}
+              {chip('Händelser',false,()=>navigation.navigate('events'))}
+              {chip('Rutt',false,()=>navigation.navigate('route'))}
             </View>
           )}
         </View>
@@ -431,7 +413,8 @@ function AppScreen() {
             )}
             <View style={s.panel}>
               {tab === "map" && (
-                <View>
+                <ScrollView style={{maxHeight:mapPanelHeight}}>
+                  <Pressable style={{position:'absolute',right:0,top:0,zIndex:1}} hitSlop={12} accessibilityRole="button" accessibilityState={{expanded:legendOpen}} onPress={()=>setLegendOpen(!legendOpen)}><Text style={[s.link,{marginTop:0}]}>{legendOpen?'Dölj':'Teckenförklaring'}</Text></Pressable>
                   <Text style={s.kicker}>
                     LÄGESBILD ·{" "}
                     {events?.fetchedAt
@@ -442,6 +425,7 @@ function AppScreen() {
                       : "HÄMTAR"}
                   </Text>
                   <Text style={s.title}>Se vad som finns runt dig</Text>
+                  <Pressable style={s.routeLink} accessibilityRole="button" onPress={()=>changeTab('family')}><Ionicons name="people-outline" size={17} color={blue}/><Text style={s.link}>Familjens karta, platser och chatt</Text></Pressable>
                   <Text style={s.body}>
                     {visibleEvents.length} ungefärliga polisnotiser och{" "}
                     {visibleAreas.length} publicerade områden i kartvyn.
@@ -462,7 +446,10 @@ function AppScreen() {
                     Polisnotiser kan vara fördröjda. Kartpunkter är inte exakta
                     brottsplatser.
                   </Text>
-                </View>
+                  {!!mapCommunity.error&&<Text style={s.warning}>Användarrapporter är fördröjda · {mapCommunity.error}</Text>}
+                  {mapCommunity.limited&&<Text style={s.warning}>Zooma in för att visa fler användarrapporter.</Text>}
+                  {legendOpen&&<MapLegend prototype/>}
+                </ScrollView>
               )}
               {tab === "events" && (
                 <ScrollView style={s.scroll}>
@@ -503,7 +490,7 @@ function AppScreen() {
               )}
               {tab === "route" && (
                 <ScrollView
-                  style={s.scroll}
+                  style={[s.scroll,{maxHeight:Math.min(330,Math.max(150,height-inset.top-inset.bottom-210))}]}
                   keyboardShouldPersistTaps="handled"
                 >
                   <Text style={s.kicker}>RUTTANALYS</Text>
@@ -624,204 +611,45 @@ function AppScreen() {
           </View>
         </Animated.View>
       )}
-      <View style={[s.tabsWrap, { bottom: inset.bottom + 8 }]}>
-        <View style={s.glass}>
-          <View style={s.tabs}>
-            {(
-              [
-                ["home", "home-outline", "Hem"],
-                ["map", "map-outline", "Karta"],
-                ["events", "pulse-outline", "Händelser"],
-                ["route", "navigate-outline", "Rutt"],
-                ["info", "person-outline", "Profil"],
-              ] as const
-            ).map(([id, icon, label]) => (
-              <Pressable
-                key={id}
-                style={s.tab}
-                accessibilityRole="tab"
-                accessibilityState={{
-                  selected:
-                    tab === id ||
-                    (id === "home" &&
-                      (["alerts", "news", "family"] as Tab[]).includes(tab)),
-                }}
-                onPress={() => changeTab(id)}
-              >
-                <Ionicons
-                  name={icon}
-                  size={22}
-                  color={
-                    tab === id ||
-                    (id === "home" &&
-                      (["alerts", "news", "family"] as Tab[]).includes(tab))
-                      ? blue
-                      : muted
-                  }
-                />
-                <Text
-                  style={[
-                    s.tabText,
-                    (tab === id ||
-                      (id === "home" &&
-                        (["alerts", "news", "family"] as Tab[]).includes(
-                          tab,
-                        ))) && { color: blue },
-                  ]}
-                >
-                  {label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-      </View>
+      {!isPrototypeTab(tab)&&<PrototypeTabs/>}
     </View>
   );
 }
 export default function App() {
+  const [fontsLoaded,fontError]=useFonts(interfaceFonts);
+  const [reduce,setReduce] = useState(false);
+  const pendingLink = useRef<()=>void>(()=>{});
+  useEffect(()=>{
+    void AccessibilityInfo.isReduceMotionEnabled().then(setReduce);
+    const motion=AccessibilityInfo.addEventListener('reduceMotionChanged',setReduce);
+    const dispatch=(navigate:()=>void)=>{if(navigationRef.isReady())navigate();else pendingLink.current=navigate;};
+    const open=(url:string)=>{try{const parsed=new URL(url),trusted=parsed.protocol===`${Constants.expoConfig?.scheme||'tryggpuls'}:`||(parsed.protocol==='https:'&&parsed.host===(Constants.expoConfig?.extra?.appLinkHost||new URL(API_BASE).host));if(!trusted)return;const params=new URLSearchParams(parsed.hash.slice(1)||parsed.search.slice(1)),action=params.get('action'),token=params.get('token');if(['verify','reset'].includes(action||'')&&token&&/^[A-Za-z0-9_-]{43}$/.test(token))dispatch(()=>navigationRef.navigate('account',{action:action as 'verify'|'reset',token}));}catch{}};
+    void Linking.getInitialURL().then(url=>{if(url)open(url);});
+    const links=Linking.addEventListener('url',event=>open(event.url));
+    const respond=(response:Notifications.NotificationResponse|null)=>{const payload=response?.notification.request.content.data;if(!payload)return;if(payload.screen==='alarm')dispatch(()=>navigationRef.navigate('alarm'));else if(payload.screen==='report'&&typeof payload.reportId==='string'&&/^[a-f0-9-]{36}$/i.test(payload.reportId)){const id=payload.reportId;dispatch(()=>navigationRef.navigate('report',{id}));}};
+    const responses=Notifications.addNotificationResponseReceivedListener(respond);
+    void Notifications.getLastNotificationResponseAsync().then(respond).catch(()=>{});
+    return()=>{motion.remove();links.remove();responses.remove();};
+  },[]);
+  if(!fontsLoaded&&!fontError)return <View style={{flex:1,backgroundColor:'#FAFBFE',alignItems:'center',justifyContent:'center'}}><ActivityIndicator color="#2187F5"/></View>;
   return (
     <SafeAreaProvider>
-      <AppScreen />
+      <FamilyProvider><AppDataProvider><NavigationContainer ref={navigationRef} onReady={()=>pendingLink.current()}>
+        <Stack.Navigator screenOptions={{headerBackButtonDisplayMode:'minimal',headerStyle:{backgroundColor:'#FAFBFE'},headerTintColor:blue,contentStyle:{backgroundColor:'#FAFBFE'},animation:reduce?'none':'slide_from_right'}}>
+          <Stack.Screen name="main" component={PrototypeMain} getId={()=>'prototype-main'} options={{headerShown:false}}/>
+          {(['alerts','family','journey','history','alarm','stats','admin'] as const).map(name=><Stack.Screen key={name} name={name} component={AppScreen} getId={()=>name} options={{headerShown:false}}/>)}
+          <Stack.Screen name="events" component={EventsScreen} options={{headerShown:false}}/>
+          <Stack.Screen name="route" component={AppScreen} options={{headerShown:false}}/>
+          <Stack.Screen name="news" component={NewsScreen} getId={()=>'news'} options={{headerShown:false}}/>
+          <Stack.Screen name="newsDetail" component={FramedNewsDetail} options={{headerShown:false}}/>
+          <Stack.Screen name="community" component={FramedCommunity} options={{headerShown:false}}/>
+          <Stack.Screen name="compose" component={FramedCompose} options={{headerShown:false}}/>
+          <Stack.Screen name="report" component={FramedReport} options={{headerShown:false}}/>
+          <Stack.Screen name="account" component={FramedAccount} options={{headerShown:false}}/>
+          <Stack.Screen name="policy" component={FramedPolicy} options={{headerShown:false}}/>
+          <Stack.Screen name="blocks" component={FramedBlocks} options={{headerShown:false}}/>
+        </Stack.Navigator>
+      </NavigationContainer><AlarmCoordinator/></AppDataProvider></FamilyProvider>
     </SafeAreaProvider>
   );
 }
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#E4EBF1" },
-  headerWrap: { position: "absolute", left: 16, right: 16 },
-  glass: {
-    backgroundColor:
-      Platform.OS === "ios" ? "rgba(255,255,255,0.82)" : "#F9FCFF",
-    borderColor: "rgba(255,255,255,0.95)",
-    borderWidth: 1,
-    borderRadius: 24,
-    overflow: "hidden",
-    shadowColor: "#2D4F70",
-    shadowOpacity: 0.17,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 7,
-  },
-  header: { padding: 13, flexDirection: "row", alignItems: "center", gap: 11 },
-  logo: {
-    width: 39,
-    height: 39,
-    borderRadius: 13,
-    backgroundColor: blue,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  brand: { color: ink, fontSize: 19, fontWeight: "800" },
-  kicker: { color: blue, fontSize: 10, fontWeight: "800", letterSpacing: 1.5 },
-  chips: { flexDirection: "row", gap: 7, marginTop: 8 },
-  chip: {
-    backgroundColor: "#fff",
-    borderColor: "#D9E5F0",
-    borderWidth: 1,
-    borderRadius: 18,
-    paddingVertical: 9,
-    paddingHorizontal: 13,
-    alignSelf: "flex-start",
-    marginRight: 5,
-  },
-  chipOn: { backgroundColor: blue, borderColor: blue },
-  chipText: { color: ink, fontSize: 12, fontWeight: "700" },
-  chipTextOn: { color: "#fff" },
-  locate: {
-    position: "absolute",
-    right: 18,
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 7,
-  },
-  panelWrap: { position: "absolute", left: 16, right: 16 },
-  panel: { padding: 16 },
-  title: {
-    color: ink,
-    fontSize: 20,
-    fontWeight: "800",
-    marginTop: 7,
-    marginBottom: 6,
-    letterSpacing: -0.4,
-  },
-  body: { color: muted, fontSize: 13, lineHeight: 19 },
-  disclaimer: { color: "#748499", fontSize: 11, lineHeight: 16, marginTop: 10 },
-  routeLink: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    marginTop: 12,
-    padding: 10,
-    backgroundColor: "#E9F3FF",
-    borderRadius: 12,
-  },
-  link: { color: blue, fontSize: 12, fontWeight: "700", marginTop: 5 },
-  scroll: { maxHeight: 330 },
-  item: {
-    borderBottomColor: "#DFE8F0",
-    borderBottomWidth: 1,
-    paddingVertical: 11,
-  },
-  itemTitle: { color: ink, fontSize: 13, fontWeight: "700", marginBottom: 3 },
-  meta: { color: "#77889B", fontSize: 11, marginTop: 6 },
-  empty: { color: muted, fontSize: 13, lineHeight: 19, paddingVertical: 15 },
-  label: {
-    color: muted,
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.5,
-    marginTop: 14,
-    marginBottom: 5,
-  },
-  input: {
-    color: ink,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#D9E5F0",
-    borderRadius: 13,
-    padding: 11,
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  primary: {
-    backgroundColor: blue,
-    borderRadius: 14,
-    padding: 14,
-    alignItems: "center",
-    marginTop: 14,
-  },
-  primaryText: { color: "#fff", fontWeight: "800", fontSize: 14 },
-  results: {
-    borderTopWidth: 1,
-    borderTopColor: "#DFE8F0",
-    marginTop: 16,
-    paddingTop: 12,
-  },
-  source: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 9,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E0E8F0",
-  },
-  dot: { height: 8, width: 8, borderRadius: 4 },
-  sourceName: { color: ink, fontSize: 12, flex: 1 },
-  sourceState: { color: muted, fontSize: 11 },
-  section: {
-    color: ink,
-    fontSize: 14,
-    fontWeight: "800",
-    marginTop: 17,
-    marginBottom: 6,
-  },
-  warning: { color: "#9D591A", fontSize: 11, marginTop: 9 },
-  tabsWrap: { position: "absolute", left: 16, right: 16 },
-  tabs: { flexDirection: "row", padding: 9 },
-  tab: { flex: 1, alignItems: "center", gap: 3 },
-  tabText: { color: muted, fontSize: 10, fontWeight: "700" },
-});

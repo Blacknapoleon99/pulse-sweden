@@ -1,0 +1,35 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {once} from 'node:events';
+import {randomUUID} from 'node:crypto';
+import {newDb} from 'pg-mem';
+import sharp from 'sharp';
+import {createFamilyService} from '../family.mjs';
+import {migrate} from '../migrations.mjs';
+import {createCommunityService,RULES_VERSION} from '../community.mjs';
+test('HTTP community API enforces sessions, CSRF, roles, ownership, public privacy and private media',async t=>{
+  const pool=new (newDb().adapters.createPg().Pool)();pool.__memory=true;t.after(()=>pool.end());const accounts=createFamilyService({pool});await accounts.init();await migrate(pool);
+  const objects=new Map(),community=createCommunityService({pool,accounts,enabled:()=>true,storage:{configured:true,put:async(key,bytes)=>objects.set(key,bytes),get:async key=>objects.get(key),remove:async key=>objects.delete(key)}});
+  const a=await accounts.register({name:'Secret Name',email:'secret@example.test',password:'synthetic-password-123'}),b=await accounts.register({name:'Viewer',email:'viewer@example.test',password:'synthetic-password-123'});
+  for(const user of [a.user,b.user]){await pool.query('UPDATE family_users SET email_verified_at=now() WHERE id=$1',[user.id]);await community.acceptRules(user,{atLeast16:true,rulesVersion:RULES_VERSION});}
+  const old=process.env.ZONE_ADMIN_TOKENS_JSON;process.env.ZONE_ADMIN_TOKENS_JSON=JSON.stringify([{id:'staff',token:'synthetic-reviewer-token-long',role:'reviewer'},{id:'editor',token:'synthetic-editor-token-long',role:'editor'}]);t.after(()=>{if(old===undefined)delete process.env.ZONE_ADMIN_TOKENS_JSON;else process.env.ZONE_ADMIN_TOKENS_JSON=old;});
+  const server=createServer((req,res)=>community.handle(req,res,new URL(req.url,'http://localhost')));server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(resolve=>server.close(resolve)));const base=`http://127.0.0.1:${server.address().port}`;
+  const request=(path,method='GET',body,token=a.token,more={})=>fetch(base+path,{method,headers:{...(token?{Authorization:`Bearer ${token}`}:{ }),'X-TryggPuls-Action':'1','Content-Type':'application/json',...more},...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const input={requestId:randomUUID(),category:'other',title:'En observation',body:'Saklig beskrivning av ett hinder.',lat:59.329312,lon:18.068643,observedAt:new Date().toISOString()};
+  assert.equal((await request('/api/community-reports','POST',input,null)).status,401);
+  assert.equal((await request('/api/community-reports','POST',input,a.token,{'X-TryggPuls-Action':''})).status,415);
+  assert.equal((await request('/api/community-reports','POST',input,a.token,{Origin:'https://elsewhere.example'})).status,403);
+  const created=await request('/api/community-reports','POST',input);assert.equal(created.status,201);const report=(await created.json()).report;
+  const publicPage=await request('/api/community-reports','GET',undefined,null);assert.equal(publicPage.headers.get('cache-control'),'no-store');const text=await publicPage.text();for(const secret of [a.user.id,a.user.email,'Secret Name',String(input.lat),String(input.lon)])assert.ok(!text.includes(secret));assert.match(text,/Obekräftad användarrapport/);
+  assert.equal((await request(`/api/community-reports/${report.id}/resolve`,'POST',{},b.token)).status,404);
+  const image=await sharp({create:{width:20,height:20,channels:3,background:'#fff'}}).png().toBuffer();const photo=await fetch(base+`/api/community-reports/${report.id}/photo`,{method:'POST',headers:{Authorization:`Bearer ${a.token}`,'X-TryggPuls-Action':'1','Content-Type':'image/png'},body:image});assert.equal(photo.status,201);
+  assert.equal((await request(`/api/community-reports/${report.id}/photo`,'GET',undefined,null)).status,404);
+  assert.equal((await request('/api/admin/community','GET',undefined,'synthetic-editor-token-long')).status,403);
+  assert.equal((await request(`/api/admin/community/reports/${report.id}/photo`,'GET',undefined,'synthetic-reviewer-token-long')).status,200);
+  assert.equal((await request('/api/admin/community/actions','POST',{action:'approve-photo',targetId:report.id,reason:'Granskad utan personuppgifter'},'synthetic-reviewer-token-long')).status,200);
+  const published=await request(`/api/community-reports/${report.id}/photo`,'GET',undefined,null);assert.equal(published.status,200);assert.equal(published.headers.get('cache-control'),'no-store');
+  assert.equal((await request('/api/community-reports','HEAD',undefined,null)).status,200);
+  await request('/api/admin/community/actions','POST',{action:'remove-report',targetId:report.id,reason:'Test av borttagning'},'synthetic-reviewer-token-long');assert.equal((await request(`/api/community-reports/${report.id}`,'GET',undefined,b.token)).status,404);
+  assert.equal((await request(`/api/community-reports/${report.id}/photo`,'GET',undefined,null)).status,404);
+});

@@ -1,0 +1,40 @@
+#cajklops-launch {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  overflow: hidden;
+  background: #080d0c;
+  opacity: 1;
+  transition: opacity 280ms ease-out;
+}
+#cajklops-launch::backdrop { background: transparent; }
+#cajklops-launch video { width: 100%; height: 100%; object-fit: contain; display: block; }
+#cajklops-launch .cajklops-launch-poster { width:100%; height:100%; object-fit:contain; display:block; }
+#cajklops-launch video[hidden], #cajklops-launch img[hidden], #cajklops-launch p[hidden] { display:none; }
+.cajklops-launch-status {
+  position:absolute; bottom:calc(env(safe-area-inset-bottom, 0px) + 32px);
+  left:50%; transform:translateX(-50%); margin:0;
+  padding:12px 20px; border-radius:16px; background:rgba(8,13,12,0.80);
+  color:#e1cba2; font:13px Arial,sans-serif; letter-spacing:0.5px;
+}
+#cajklops-launch button {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 20px);
+  right: 24px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: #c4a46c;
+  font: 12px Arial, sans-serif;
+  cursor: pointer;
+}
+#cajklops-launch button:focus-visible { outline: 1px solid #c4a46c; outline-offset: 3px; }
+#cajklops-launch.cajklops-launch--closing { opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { #cajklops-launch { transition: none; } }

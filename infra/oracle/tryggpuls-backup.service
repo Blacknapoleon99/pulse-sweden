@@ -1,0 +1,22 @@
+[Unit]
+Description=Encrypted TryggPuls database backup to private object storage
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tryggpuls
+Group=tryggpuls
+WorkingDirectory=/opt/tryggpuls/current
+EnvironmentFile=/etc/tryggpuls/app.env
+EnvironmentFile=/etc/tryggpuls/backup.env
+Environment=PGTOOLS_BIN=/usr/lib/postgresql/18/bin
+Environment=BACKUP_DIRECTORY=/var/lib/tryggpuls/backups
+ExecStart=/usr/local/bin/node scripts/cloud-backup.mjs
+TimeoutStartSec=900
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tryggpuls

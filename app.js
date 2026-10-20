@@ -35,6 +35,7 @@ const state = {
   braData: null,
   sources: [],
   policeAreas: null,
+  publicMapItems: [],
   showPoliceAreas: true,
   nearbyPoint: null,
   nearbyLabel: '',
@@ -128,6 +129,37 @@ const routeLayer = L.layerGroup().addTo(map);
 const zonesLayer = L.layerGroup().addTo(map);
 const userLayer = L.layerGroup().addTo(map);
 const nearbyLayer = L.layerGroup().addTo(map);
+const communityLayer = L.layerGroup().addTo(map);
+let communityRequest = 0, communityFetching = false;
+const communityMarkers = new Map();
+function pruneCommunityMarkers(visibleIds) {
+  for(const [id,item]of communityMarkers)if(item.expires<=Date.now()||(visibleIds&&!visibleIds.has(id))){communityLayer.removeLayer(item.marker);communityLayer.removeLayer(item.area);communityMarkers.delete(id);}
+}
+async function refreshCommunityMap() {
+  if (document.hidden || communityFetching) return;
+  communityFetching = true; const version = ++communityRequest;
+  try {
+    const bounds=map.getBounds(),bbox=[bounds.getWest(),bounds.getSouth(),bounds.getEast(),bounds.getNorth()].join(',');
+    const response=await fetch(`/api/community-reports?limit=100&bbox=${encodeURIComponent(bbox)}`);
+    const data=await response.json();if(!response.ok)throw new Error('Rapportflödet kunde inte hämtas');if(version!==communityRequest)return;
+    const visibleIds=new Set();
+    for(const report of data.items||[]){
+      if(report.status!=='active'||Date.parse(report.expiresAt)<=Date.now())continue;
+      visibleIds.add(report.id);const point=[report.location.lat,report.location.lon],expires=Date.parse(report.expiresAt);
+      const popup=`<strong>Obekräftad användarrapport</strong><h3>${esc(report.title)}</h3><p>${esc(report.body)}</p><p>Ungefärlig plats · ${esc(report.author.alias)} · ${esc(new Date(report.observedAt).toLocaleString('sv-SE'))}</p><a href="/community#report=${encodeURIComponent(report.id)}">Läs rapport och kommentarer</a>`;
+      const existing=communityMarkers.get(report.id);
+      if(existing){existing.expires=expires;if(existing.popup!==popup){existing.marker.setPopupContent(popup);existing.popup=popup;}}
+      else {const area=L.circle(point,{radius:75,color:'#6D42A1',weight:1,fillOpacity:.08}).addTo(communityLayer),marker=L.circleMarker(point,{radius:8,color:'#6D42A1',weight:2,fillColor:'#fff',fillOpacity:1}).bindPopup(popup).addTo(communityLayer);communityMarkers.set(report.id,{marker,area,popup,expires});}
+    }
+    pruneCommunityMarkers(visibleIds);
+  } catch { pruneCommunityMarkers(); }
+  finally { communityFetching=false; }
+}
+document.querySelector('#btn-community-layer')?.addEventListener('click',event=>{const button=event.currentTarget,visible=map.hasLayer(communityLayer);if(visible)map.removeLayer(communityLayer);else{communityLayer.addTo(map);void refreshCommunityMap();}button.setAttribute('aria-pressed',String(!visible));});
+map.on('moveend',()=>void refreshCommunityMap());
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refreshCommunityMap();});
+setInterval(()=>void refreshCommunityMap(),10_000);
+void refreshCommunityMap();
 
 // Säkerhetskorridor (ruttanalys): halvgenomskinlig bård runt rutten.
 // Referens hålls i ett var så att zoomend kan uppdatera bredden.
@@ -360,6 +392,7 @@ function renderMapIncidents() {
       }
     });
   }
+  if (state.activeTab === 'karta') renderPublicMapItemsOnMap();
 }
 
 function showIncidentDetail(id) {
@@ -521,6 +554,27 @@ async function calculateRoute({ refresh = false } = {}) {
       calcBtn.textContent = 'Beräkna rutt';
     }
   }
+}
+
+function renderPublicMapItemsOnMap() {
+  for (const feature of state.publicMapItems || []) {
+    const [lon, lat] = feature.geometry?.coordinates || [];
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const item = feature.properties || {};
+    const color = item.kind === 'safety-notice' ? '#b42332' : '#176fe1';
+    const marker = L.circleMarker([lat, lon], { radius: 8, color, fillColor: color, fillOpacity: 0.88, weight: 2 }).addTo(markersLayer);
+    marker.bindPopup(`<strong>${esc(item.title || item.name)}</strong><br>${esc(item.description)}<br><small>TryggPuls-granskad kartpost · inte en myndighetsvarning.<br>Gäller till ${esc(formatSwedishTime(Date.parse(item.validTo || '')))}</small><br><a href="${esc(item.sourceUrl)}" target="_blank" rel="noopener">${esc(item.sourceTitle || 'Öppna källan')} ↗</a>`);
+  }
+}
+
+async function loadPublicMapItems() {
+  try {
+    const response = await fetch('/api/public-map-items', { headers: { Accept: 'application/json' } });
+    if (!response.ok) return;
+    const data = await response.json();
+    state.publicMapItems = Array.isArray(data.features) ? data.features : [];
+    if (state.activeTab === 'karta') renderMapIncidents();
+  } catch { /* Keep the last successfully fetched map items. */ }
 }
 window.showToast = showToast;
 
@@ -1754,14 +1808,19 @@ function init() {
   // Starta hämtning av Polisen data
   refreshPoliceEvents();
   loadPoliceAreas();
+  loadPublicMapItems();
   loadSecurityZoneNews();
   refreshCrisisUpdates();
   refreshInformation();
   renderFamilyZones(); renderWorkplaces();
   setInterval(() => { if (!document.hidden) refreshInformation(); }, 65000);
   setInterval(refreshPoliceEvents, 65000);
+  setInterval(() => { if (!document.hidden) loadPublicMapItems(); }, 65000);
   setInterval(refreshCrisisUpdates, 65000);
   setInterval(() => { if (!document.hidden) loadSecurityZoneNews(); }, 30 * 60_000);
+  // The interactive shell is ready; network-fed cards update independently.
+  document.documentElement.dataset.cajklopsReady = 'true';
+  window.dispatchEvent(new Event('cajklops:ready'));
 }
 
 // Kör init när DOM är laddad

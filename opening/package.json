@@ -1,0 +1,42 @@
+{
+  "name": "opening",
+  "version": "1.0.0",
+  "description": "Cajklops cinematic app opening",
+  "repository": {},
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@react-three/fiber": "9.8.1",
+    "@remotion/bundler": "4.0.530",
+    "@remotion/cli": "4.0.530",
+    "@remotion/renderer": "4.0.530",
+    "@remotion/three": "4.0.530",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.530",
+    "sharp": "0.35.5",
+    "three": "0.183.2"
+  },
+  "devDependencies": {
+    "@remotion/eslint-config-flat": "4.0.530",
+    "@types/react": "19.2.7",
+    "@types/three": "^0.186.0",
+    "@types/web": "0.0.166",
+    "eslint": "9.39.5",
+    "opentype.js": "^2.0.0",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "dev": "remotion studio --no-open --port=4300",
+    "build": "remotion bundle",
+    "upgrade": "remotion upgrade",
+    "lint": "eslint src && tsc",
+    "render": "node scripts/render.mjs",
+    "render:icon": "node scripts/render-icon.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "sideEffects": [
+    "*.css"
+  ]
+}

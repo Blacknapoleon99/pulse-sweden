@@ -1,302 +1,431 @@
-import { useEffect, useState } from "react";
+import { Text } from './Typography';
+import { useEffect, useMemo, useState } from "react";
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { matchMunicipality, feedAvailable } from "./mobileState";
 import {
-  Linking,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import { getJson, type BraStats, type Event, type Feature } from "./api";
-
-type Section = "overview" | "history" | "common" | "factors";
-const sections: { id: Section; title: string }[] = [
-  { id: "overview", title: "Övergripande" },
-  { id: "history", title: "Senaste tio år" },
-  { id: "common", title: "Vanligt förekommande" },
-  { id: "factors", title: "Riskfaktorer" },
-];
-const blue = "#176FE1",
-  ink = "#142942",
-  muted = "#64768D";
-
+  getJson,
+  type BraStats,
+  type Event,
+  type EventsResponse,
+  type Feature,
+} from "./api";
+import {
+  incidentCounts,
+  incidentDays,
+  incidentSeries,
+  observedIncidents,
+  type SeriesPeriod,
+} from "./incidentSummary";
+import {
+  ReferenceBars,
+  ReferenceLines,
+  ReferenceTrend,
+} from "./ReferenceCharts";
+import { DropdownPill, SearchBar } from "./ReferenceKit";
+import { Segments, Section, Surface, DetailRow } from "./ReferenceUI";
+import { Freshness, StateCard, SourceDisclosure } from "./UI";
+import { colors, ui } from "./theme";
+import { useVisibleClock } from "./useVisibleClock";
+const periods = [
+  { id: "1", label: "Senaste 24 timmarna" },
+  { id: "7", label: "Senaste 7 dagarna" },
+  { id: "30", label: "Senaste 30 dagarna" },
+  { id: "365", label: "Senaste 12 månaderna" },
+] as const;
+const seriesPeriods = [
+  { id: "week", label: "Vecka" },
+  { id: "month", label: "Månad" },
+  { id: "year", label: "År" },
+] as const;
+const sections = [
+  { id: "overview", label: "Översikt" },
+  { id: "trends", label: "Trender" },
+  { id: "compare", label: "Jämför områden" },
+] as const;
 export function StatsScreen({
   nearby,
   areas,
+  initialMunicipality,
+  eventsResponse,
+  centerLabel = "kartans mitt",
 }: {
+  initialMunicipality?: string;
   nearby: Event[];
   areas: Feature[];
+  eventsResponse?: EventsResponse | null;
+  centerLabel?: string;
 }) {
-  const [section, setSection] = useState<Section>("overview");
-  const [data, setData] = useState<BraStats | null>(null);
-  const [error, setError] = useState("");
-  const [region, setRegion] = useState("");
-  const [query, setQuery] = useState("");
+  const [section, setSection] = useState<"overview" | "trends" | "compare">(
+      "overview",
+    ),
+    [data, setData] = useState<BraStats | null>(null),
+    [error, setError] = useState(""),
+    [reload, setReload] = useState(0);
+  const [region, setRegion] = useState(""),
+    [comparison, setComparison] = useState(""),
+    [query, setQuery] = useState(""),
+    [days, setDays] = useState<(typeof periods)[number]["id"]>("30"),
+    [periodOpen, setPeriodOpen] = useState(false),
+    [seriesPeriod, setSeriesPeriod] = useState<SeriesPeriod>("week");
+  const now = useVisibleClock(30_000);
   useEffect(() => {
-    getJson<BraStats>("/api/bra-stats")
-      .then((result) => {
-        setData(result);
-        setRegion(
-          result.regions.find((r) => r.region === "Stockholm")?.region ||
-            result.regions[0]?.region ||
-            "",
-        );
-      })
-      .catch((err) =>
-        setError(
-          err instanceof Error ? err.message : "BRÅ-data kunde inte hämtas",
-        ),
+    const controller = new AbortController();
+    setError("");
+    void getJson<BraStats>("/api/bra-stats", controller.signal)
+      .then((result) => setData(result))
+      .catch((caught) => {
+        if (!controller.signal.aborted)
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "BRÅ-data kunde inte hämtas",
+          );
+      });
+    return () => controller.abort();
+  }, [reload]);
+  useEffect(() => {
+    if (data && initialMunicipality)
+      setRegion(matchMunicipality(initialMunicipality, data.regions));
+  }, [initialMunicipality, data]);
+  const selected = data?.regions.find((item) => item.region === region),
+    compared = data?.regions.find((item) => item.region === comparison);
+  const observed = useMemo(
+      () => observedIncidents(nearby, Number(days), now),
+      [nearby, days, now],
+    ),
+    buckets = useMemo(() => incidentDays(observed), [observed]),
+    series = useMemo(
+      () => incidentSeries(nearby, seriesPeriod, now),
+      [nearby, seriesPeriod, now],
+    );
+  const available = feedAvailable(eventsResponse ?? null),
+    source = () =>
+      void Linking.openURL(data?.sourceUrl || "https://bra.se/statistik").catch(
+        () => {},
       );
-  }, []);
-  const current = data?.regions.find((r) => r.region === region);
-  const counts = Object.entries(
-    nearby.reduce<Record<string, number>>((all, e) => {
-      all[e.type || "Övrigt"] = (all[e.type || "Övrigt"] || 0) + 1;
-      return all;
-    }, {}),
-  )
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
-  const openBra = () => {
-    void Linking.openURL(
-      data?.sourceUrl ||
-        "https://bra.se/statistik/statistik-om-rattsvasendet/anmalda-brott",
-    );
-  };
-  const openHistory = () => {
-    void Linking.openURL(
-      "https://bra.se/download/18.11dab50419d723e44d315606/1776153587771/10La_anm_10_ar.xlsx",
-    );
-  };
+  const range = observed.length
+    ? `${buckets[0]?.day}–${buckets.at(-1)?.day}`
+    : null;
+  const regionMatches = (data?.regions || []).filter(
+    (item) =>
+      !query ||
+      item.region
+        .toLocaleLowerCase("sv-SE")
+        .includes(query.toLocaleLowerCase("sv-SE")),
+  );
+  function choose(name: string) {
+    if (section === "compare" && region && region !== name)
+      setComparison(name);
+    else setRegion(name);
+    setQuery("");
+  }
+  const comparisonCard = (
+    <Surface>
+      <View style={s.cardHead}>
+        <Text style={[ui.heading, { flex: 1 }]}>Jämförelse över tid</Text>
+        <View style={s.miniSegments}>
+          {seriesPeriods.map((item) => (
+            <Pressable
+              key={item.id}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: item.id === seriesPeriod }}
+              onPress={() => setSeriesPeriod(item.id)}
+              style={[
+                s.miniSegment,
+                item.id === seriesPeriod && s.miniSegmentOn,
+              ]}
+            >
+              <Text
+                style={[
+                  s.miniText,
+                  item.id === seriesPeriod && { color: "#fff" },
+                ]}
+              >
+                {item.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      {!available ? (
+        <Text style={ui.body}>Polisflödet är inte tillgängligt.</Text>
+      ) : series.labels.length >= 2 ? (
+        <ReferenceLines labels={series.labels} series={series.series} />
+      ) : (
+        <StateCard
+          title="Underlaget är för kort för en kurva"
+          body="De hämtade polisnotiserna täcker inte tillräckligt många perioder. Välj en kortare period."
+        />
+      )}
+      <Text style={ui.meta}>
+        {series.complete
+          ? "Antal hämtade polisnotiser per period."
+          : "Perioder före den äldsta hämtade notisen visas inte i stället för att visas som noll."}
+      </Text>
+    </Surface>
+  );
   return (
     <View>
-      <Text style={s.eyebrow}>STATISTIK · OFFENTLIGA KÄLLOR</Text>
-      <Text style={s.heading}>Utforska din lägesbild</Text>
-      <Text style={s.note}>
-        BRÅ:s årsstatistik och polisens publicerade notiser avser olika mått. De
-        visar inte risken för dig som person.
-      </Text>
-      <View style={s.menu}>
-        {sections.map((item) => (
-          <Pressable
-            key={item.id}
-            style={[s.menuItem, section === item.id && s.menuSelected]}
-            onPress={() => setSection(item.id)}
-          >
-            <Text
-              style={[s.menuText, section === item.id && s.menuTextSelected]}
+      <SearchBar
+        value={query}
+        onChangeText={setQuery}
+        placeholder="Sök plats, adress eller område…"
+        onSubmit={() => regionMatches[0] && choose(regionMatches[0].region)}
+        onFilter={() => setPeriodOpen((open) => !open)}
+        filterLabel="Välj period"
+      />
+      {!!query && (
+        <View style={[ui.row, { marginBottom: 6 }]}>
+          {regionMatches.slice(0, 8).map((item) => (
+            <Pressable
+              key={item.region}
+              accessibilityRole="button"
+              onPress={() => choose(item.region)}
+              style={s.chip}
             >
-              {item.title}
+              <Text style={s.chipText}>{item.region}</Text>
+            </Pressable>
+          ))}
+          {!regionMatches.length && (
+            <Text style={ui.meta}>
+              {data ? "Ingen kommun matchar sökningen." : "Hämtar kommuner…"}
             </Text>
-          </Pressable>
-        ))}
-      </View>
-      {!!error && <Text style={s.error}>{error}</Text>}
-      {section === "overview" && (
-        <>
-          <Text style={s.title}>Anmälda brott per kommun</Text>
-          <Text style={s.note}>
-            Välj kommun. Siffrorna avser hela kommunen, inte en gata eller ett
-            kvarter.
+          )}
+        </View>
+      )}
+      <Segments items={sections} value={section} onChange={setSection} />
+      {section === "trends" && comparisonCard}
+      {section !== "compare" && (
+        <Surface>
+          <Text style={ui.heading}>
+            {section === "overview"
+              ? "Vanligast förekommande incidenter"
+              : "Notiser per datum"}
           </Text>
-          <TextInput
-            style={s.input}
-            placeholder="Sök kommun"
-            value={query}
-            onChangeText={setQuery}
-            autoCapitalize="words"
+          <DropdownPill
+            label={periods.find((item) => item.id === days)!.label}
+            onPress={() => setPeriodOpen((open) => !open)}
           />
-          <View style={s.regionRow}>
-            {data?.regions
-              .filter(
-                (r) =>
-                  !query ||
-                  r.region
-                    .toLocaleLowerCase("sv-SE")
-                    .includes(query.toLocaleLowerCase("sv-SE")),
-              )
-              .slice(0, query ? 20 : 8)
-              .map((r) => (
+          {periodOpen && (
+            <View style={s.menu}>
+              {periods.map((item) => (
                 <Pressable
-                  key={r.region}
-                  style={[s.region, region === r.region && s.regionOn]}
+                  key={item.id}
+                  accessibilityRole="menuitem"
+                  accessibilityState={{ selected: item.id === days }}
                   onPress={() => {
-                    setRegion(r.region);
-                    setQuery("");
+                    setDays(item.id);
+                    setPeriodOpen(false);
                   }}
+                  style={s.menuItem}
                 >
                   <Text
                     style={[
-                      s.regionText,
-                      region === r.region && s.regionTextOn,
+                      s.menuText,
+                      item.id === days && {
+                        color: colors.blue,
+                        fontWeight: "800",
+                      },
                     ]}
                   >
-                    {r.region}
+                    {item.label}
                   </Text>
+                  {item.id === days && (
+                    <Ionicons name="checkmark" size={16} color={colors.blue} />
+                  )}
                 </Pressable>
               ))}
-          </View>
-          {current ? (
-            <View style={s.card}>
-              <Text style={s.title}>
-                {current.region} · {data?.referenceYear || "år ej angivet"}
-              </Text>
-              <Text style={s.number}>
-                {current.totalPer100k.toLocaleString("sv-SE")}
-              </Text>
-              <Text style={s.note}>anmälda brott per 100 000 invånare</Text>
-              <Text style={s.detail}>
-                {current.total.toLocaleString("sv-SE")} anmälningar · plats{" "}
-                {current.rank} av {data?.regions.length} kommuner
-              </Text>
-              <Text style={s.detail}>{current.riskIndex}</Text>
-              <Text style={s.note}>
-                Rikssnitt:{" "}
-                {data?.nationalAverage.totalPer100k.toLocaleString("sv-SE")} per
-                100 000 invånare{data?.stale ? " · äldre hämtning" : ""}
-              </Text>
             </View>
-          ) : (
-            <Text style={s.note}>Hämtar BRÅ-statistik…</Text>
           )}
-          <Pressable onPress={openBra}>
-            <Text style={s.link}>Källa och metod hos BRÅ ↗</Text>
-          </Pressable>
-        </>
-      )}
-      {section === "history" && (
-        <View style={s.card}>
-          <Text style={s.title}>Utveckling över tio år</Text>
-          <Text style={s.note}>
-            TryggPuls nuvarande BRÅ-API ger ett referensår per kommun. En
-            jämförbar tioårig serie finns hos BRÅ, men hämtas ännu inte till
-            appen. Här visas därför inga uppskattade värden.
-          </Text>
-          <Pressable onPress={openHistory}>
-            <Text style={s.link}>Hämta BRÅ:s officiella tioårsfil ↗</Text>
-          </Pressable>
-        </View>
-      )}
-      {section === "common" && (
-        <>
-          <Text style={s.title}>Vanliga typer i hämtade polisnotiser</Text>
-          <Text style={s.note}>
-            Det här är typer bland de senast hämtade polisnotiserna inom cirka
-            35 km från kartans mitt eller din plats, inte statistik över alla
-            begångna brott.
-          </Text>
-          {counts.length ? (
-            counts.map(([name, count]) => (
-              <View key={name} style={s.listItem}>
-                <Text style={s.listName}>{name}</Text>
-                <Text style={s.count}>{count}</Text>
-              </View>
-            ))
+          {section === "overview" ? (
+            <ReferenceBars
+              items={incidentCounts(observed)}
+              available={available}
+            />
+          ) : !available ? (
+            <Text style={ui.body}>Polisflödet är inte tillgängligt.</Text>
+          ) : buckets.length >= 3 ? (
+            <ReferenceTrend items={buckets} />
           ) : (
-            <Text style={s.note}>Inga polisnotiser i valt område.</Text>
+            <StateCard
+              title="Underlaget är för kort för en trend"
+              body="Minst tre datum med publicerade notiser behövs för att visa en kurva. Appen har ingen komplett historik för den valda perioden."
+            />
           )}
-        </>
-      )}
-      {section === "factors" && (
-        <>
-          <Text style={s.title}>Publicerade områdesuppgifter</Text>
-          <Text style={s.note}>
-            Områdesbedömningar och säkerhetszoner är myndighetsuppgifter, inte
-            en personlig riskpoäng eller en livekarta över brott.
+          <SourceDisclosure summary={`Hämtade polisnotiser · ${observed.length} i urvalet`}><Text style={ui.meta}>
+            Inom cirka 35 km från {centerLabel}.{" "}
+            {range ? `Observerade datum: ${range}. ` : ""}Antal i hämtade
+            polisnotiser. Den valda perioden kan ha ofullständigt underlag;
+            inga saknade dagar fylls med noll.
           </Text>
-          <Pressable
-            onPress={() =>
-              void Linking.openURL(
-                "https://bra.se/statistik/indikatorer-for-kommuners-lagesbild",
-              )
-            }
-          >
-            <Text style={s.link}>BRÅ:s indikatorer för kommuner ↗</Text>
-          </Pressable>
-          {areas.length ? (
-            areas.slice(0, 10).map((area, i) => (
+          <Freshness
+            fetchedAt={eventsResponse?.fetchedAt}
+            error={eventsResponse?.stale ? "Äldre hämtning" : undefined}
+          />
+          </SourceDisclosure>
+        </Surface>
+      )}
+      {section === "overview" && comparisonCard}
+      <Section
+        title={
+          section === "compare" ? "Jämför kommuner" : "BRÅ:s kommunstatistik"
+        }
+      />
+      <Surface>
+        <Text style={ui.body}>
+          Anmälda brott per 100 000 invånare ·{" "}
+          {data?.referenceYear || "referensår hämtas"}. Kommunnivå, separat från
+          polisnotiserna. Sök kommun i fältet överst.
+        </Text>
+        <View style={ui.row}>
+          {(data?.regions || []).slice(0, 6).map((item) => {
+            const on = item.region === region || item.region === comparison;
+            return (
               <Pressable
-                key={`${area.id || area.properties.name}-${i}`}
-                style={s.listItem}
-                onPress={() =>
-                  area.properties.sourceUrl &&
-                  Linking.openURL(area.properties.sourceUrl)
-                }
+                key={item.region}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                onPress={() => choose(item.region)}
+                style={[s.chip, on && s.chipOn]}
               >
-                <View style={{ flex: 1 }}>
-                  <Text style={s.listName}>{area.properties.name}</Text>
-                  <Text style={s.note}>
-                    {area.properties.category ||
-                      area.properties.kind ||
-                      "Officiellt område"}
-                  </Text>
-                </View>
-                <Text style={s.link}>Källa ↗</Text>
+                <Text style={[s.chipText, on && { color: "#fff" }]}>
+                  {item.region}
+                </Text>
               </Pressable>
-            ))
+            );
+          })}
+        </View>
+        {selected ? (
+          <>
+            <Text style={ui.heading}>{selected.region}</Text>
+            <Text style={s.number}>
+              {selected.totalPer100k.toLocaleString("sv-SE")}
+            </Text>
+            <Text style={ui.meta}>
+              {selected.total.toLocaleString("sv-SE")} anmälningar ·{" "}
+              {data?.stale ? "äldre hämtning · " : ""}referensår{" "}
+              {data?.referenceYear || "saknas"}
+            </Text>
+          </>
+        ) : (
+          <Text style={ui.body}>
+            {data
+              ? "Välj en kommun för att se årsstatistiken."
+              : "Hämtar BRÅ-statistik…"}
+          </Text>
+        )}
+        {section === "compare" &&
+          selected &&
+          (compared ? (
+            <>
+              <Text style={ui.heading}>{compared.region}</Text>
+              <Text style={s.number}>
+                {compared.totalPer100k.toLocaleString("sv-SE")}
+              </Text>
+              <Text style={ui.meta}>
+                Samma mått och referensår som kommunen ovan.
+              </Text>
+            </>
           ) : (
-            <Text style={s.note}>Inga publicerade områden i hämtad data.</Text>
-          )}
+            <Text style={ui.body}>Välj en andra kommun för jämförelse.</Text>
+          ))}
+        {selected && data && (
+          <DetailRow
+            title="Rikssnitt"
+            body={`${data.nationalAverage.totalPer100k.toLocaleString("sv-SE")} per 100 000 invånare`}
+            icon="stats-chart-outline"
+          />
+        )}
+        {error && (
+          <StateCard
+            title="BRÅ kunde inte hämtas"
+            body={error}
+            retry={() => setReload((value) => value + 1)}
+          />
+        )}
+        <DetailRow
+          title="Källa och metod hos BRÅ"
+          onPress={source}
+          icon="open-outline"
+        />
+      </Surface>
+      {section === "overview" && areas.length > 0 && (
+        <>
+          <Section title="Publicerade områdesuppgifter" />
+          <Surface>
+            {areas.slice(0, 4).map((area, index) => (
+              <DetailRow
+                key={area.id || index}
+                title={area.properties.name}
+                body={area.properties.category || "Myndighetsbedömning"}
+                icon="map-outline"
+                color={colors.community}
+                onPress={() =>
+                  void Linking.openURL(
+                    area.properties.sourceUrl ||
+                      "https://polisen.se/om-polisen/polisens-arbete/utsatta-omraden/",
+                  ).catch(() => {})
+                }
+              />
+            ))}
+          </Surface>
         </>
       )}
+      <Text style={ui.meta}>
+        Uppgifterna beskriver källornas underlag och är ingen personlig
+        riskpoäng.
+      </Text>
     </View>
   );
 }
 const s = StyleSheet.create({
-  eyebrow: { color: blue, fontSize: 10, fontWeight: "800", letterSpacing: 1.4 },
-  heading: { color: ink, fontSize: 25, fontWeight: "800", marginTop: 7 },
-  note: { color: muted, fontSize: 12, lineHeight: 18, marginTop: 7 },
-  menu: { marginTop: 19, marginBottom: 18, gap: 7 },
+  cardHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+  miniSegments: {
+    flexDirection: "row",
+    backgroundColor: "#F0F3F9",
+    borderRadius: 8,
+    padding: 2,
+  },
+  miniSegment: {
+    paddingHorizontal: 10,
+    minHeight: 28,
+    justifyContent: "center",
+    borderRadius: 7,
+  },
+  miniSegmentOn: { backgroundColor: colors.blue },
+  miniText: { fontSize: 11, fontWeight: "700", color: colors.muted },
+  menu: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    overflow: "hidden",
+  },
   menuItem: {
-    backgroundColor: "#fff",
-    padding: 14,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: "#E3EAF3",
-  },
-  menuSelected: { backgroundColor: "#E7F1FF", borderColor: blue },
-  menuText: { color: ink, fontWeight: "700", fontSize: 14 },
-  menuTextSelected: { color: blue },
-  title: { color: ink, fontWeight: "800", fontSize: 17, marginTop: 7 },
-  card: {
-    backgroundColor: "#fff",
-    borderRadius: 18,
-    padding: 17,
-    borderWidth: 1,
-    borderColor: "#E3EAF3",
-    marginTop: 12,
-  },
-  regionRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 12 },
-  region: {
-    backgroundColor: "#fff",
-    borderRadius: 11,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-  },
-  regionOn: { backgroundColor: blue },
-  regionText: { color: ink, fontSize: 10 },
-  regionTextOn: { color: "#fff" },
-  input: {
-    borderColor: "#D9E3EE",
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 11,
-    marginTop: 12,
-    backgroundColor: "#fff",
-    color: ink,
-  },
-  number: { color: blue, fontSize: 38, fontWeight: "800", marginTop: 8 },
-  detail: { color: ink, fontSize: 12, marginTop: 10 },
-  link: { color: blue, fontWeight: "800", fontSize: 12, marginTop: 14 },
-  listItem: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 13,
-    marginTop: 9,
+    minHeight: 42,
+    paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  listName: { color: ink, fontWeight: "700", fontSize: 13, flex: 1 },
-  count: { color: blue, fontWeight: "800", fontSize: 16 },
-  error: { color: "#A43E31", marginTop: 12 },
+  menuText: { fontSize: 13, color: colors.ink },
+  chip: {
+    minHeight: 36,
+    borderRadius: 10,
+    backgroundColor: colors.secondary,
+    paddingHorizontal: 12,
+    justifyContent: "center",
+  },
+  chipOn: { backgroundColor: colors.blue },
+  chipText: { fontSize: 12, fontWeight: "700", color: colors.blue },
+  number: {
+    fontSize: 32,
+    fontWeight: "800",
+    color: colors.ink,
+    letterSpacing: -1,
+    marginVertical: 4,
+  },
 });

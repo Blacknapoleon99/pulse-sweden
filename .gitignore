@@ -8,3 +8,4 @@ mobile/.expo/
 mobile/android/
 mobile/ios/
 mobile/dist/
+mobile/dist-*/

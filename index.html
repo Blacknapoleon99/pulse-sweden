@@ -3,33 +3,42 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#101820">
+  <meta name="theme-color" content="#080d0c">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="TryggPuls">
+  <meta name="apple-mobile-web-app-title" content="Cajklops">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/icon-192.png">
-  <title>TryggPuls — Sveriges Digitala Trygghetsplattform</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+  <link rel="apple-touch-icon" href="/assets/cajklops-icon.png">
+  <title>Cajklops — Sveriges Digitala Trygghetsplattform</title>
+  <link rel="icon" type="image/png" href="/assets/cajklops-icon.png">
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="/style.css?v=4">
+  <link rel="stylesheet" href="/cajklops-opening.css?v=2">
 
+  <!-- Show the opening while the heavier application scripts load. -->
+  <script src="/cajklops-opening.js?v=2" defer></script>
   <!-- Leaflet JS -->
   <script src="/vendor/leaflet/leaflet.js" defer></script>
-  <script type="module" src="/app.js?v=9"></script>
+  <script type="module" src="/app.js?v=10"></script>
   <script src="/family-client.js?v=1" defer></script>
 </head>
 <body>
+  <dialog id="cajklops-launch" aria-label="Cajklops öppningsanimation">
+    <img class="cajklops-launch-poster" src="/assets/cajklops-poster.png" alt="Cajklops. Ett öga i en gyllene triangel." hidden>
+    <video data-src="/assets/cajklops-opening.mp4" data-everyday-src="/assets/cajklops-everyday.mp4" poster="/assets/cajklops-poster.png" muted playsinline preload="none" aria-label="Ett realistiskt öga blinkar och ser sig omkring i en gyllene triangel"></video>
+    <p class="cajklops-launch-status" role="status" hidden>Öppnar Cajklops…</p>
+    <button type="button" autofocus>Hoppa över</button>
+  </dialog>
   <a class="skip-link" href="#sidebar">Hoppa till innehållet</a>
   <noscript><p>Aktivera JavaScript för karta och flöden. <a href="https://www.krisinformation.se/">Krisinformation</a> · <a href="tel:112">Ring 112 vid akut fara</a></p></noscript>
 <!-- HUVUDNAVIGERING & HEADER -->
   <header>
     <div class="brand-block">
-      <a class="brand" href="/" aria-label="TryggPuls startsida">
-        <span class="brand-shield">🛡️</span>
+      <a class="brand" href="/" aria-label="Cajklops startsida">
+        <img class="brand-shield" src="/assets/cajklops-icon.png" alt="" width="44" height="44">
         <div class="brand-text">
-          <span class="brand-title">Trygg<strong>Puls</strong></span>
+          <span class="brand-title">Cajklops</span>
           <span class="brand-subtitle">Sveriges Trygghetsplattform</span>
         </div>
       </a>
@@ -458,7 +467,7 @@
         </div>
 
         <div class="sos-privacy-note">
-          <strong>Om integritet:</strong> Din position hämtas först när du väljer det. För adressuppslag skickas koordinater via TryggPuls till OpenStreetMap/Nominatim. Ruttens koordinater skickas till FOSSGIS OSRM. Sparade zoner finns i din webbläsare. Delning öppnar din enhets SMS-/delafunktion; du väljer själv mottagare och skickar meddelandet.
+          <strong>Om integritet:</strong> Din position hämtas först när du väljer det. För adressuppslag skickas koordinater via Cajklops till OpenStreetMap/Nominatim. Ruttens koordinater skickas till FOSSGIS OSRM. Sparade zoner finns i din webbläsare. Delning öppnar din enhets SMS-/delafunktion; du väljer själv mottagare och skickar meddelandet.
         </div>
       </section>
 
@@ -481,10 +490,12 @@
         <div class="map-quick-actions">
           <button id="btn-reset-map" class="btn-map-control" type="button" aria-label="Visa hela Sverige" title="Visa hela Sverige">Hela Sverige</button>
           <button id="btn-my-location" class="btn-map-control" title="Hitta min position">📍 Min position</button>
+          <a href="/community#compose" class="btn-map-control">Rapportera</a>
           <details id="map-layers-panel" class="map-layer-panel">
             <summary class="btn-map-control">▧ Kartlager</summary>
             <div class="map-layer-options" role="group" aria-label="Kartlager och kartvy">
               <button id="btn-police-areas" class="btn-map-control" type="button" aria-pressed="true">Polisens områdesbedömningar</button>
+              <button id="btn-community-layer" class="btn-map-control" type="button" aria-pressed="true">Obekräftade användarrapporter</button>
             </div>
           </details>
         </div>
@@ -494,11 +505,12 @@
       <div class="map-floating-title">
         <span class="eyebrow" id="map-banner-eyebrow">REALTIDSLÄGE</span>
         <h2 id="map-banner-title">Hela Sverige</h2>
-        <p id="map-banner-subtitle">Visar verifierade händelser från Polisen.se</p>
+        <p id="map-banner-subtitle">Polisens publicerade notiser · separata obekräftade användarrapporter</p>
       </div>
 
       <!-- TECKENFÖRKLARING (LEGEND) -->
       <div class="map-legend">
+        <span class="legend-item"><i class="legend-dot" style="background:white;border:2px solid #6D42A1"></i> Obekräftad användarrapport · ungefärlig plats</span>
         <span class="legend-item"><i class="legend-dot violence"></i> Våld & Rån</span>
         <span class="legend-item"><i class="legend-dot theft"></i> Stöld & Inbrott</span>
         <span class="legend-item"><i class="legend-dot traffic"></i> Trafikolycka</span>
@@ -521,10 +533,10 @@
 
   <dialog id="more-dialog" class="more-dialog">
     <button class="btn-modal-close" id="btn-close-more" aria-label="Stäng menyn">×</button>
-    <div class="eyebrow">FLER TJÄNSTER</div><h2>Mer i TryggPuls</h2>
+    <div class="eyebrow">FLER TJÄNSTER</div><h2>Mer i Cajklops</h2>
     <div class="more-links">
       <button data-go="information">Väder & beredskap</button><button data-go="bra">Brottsstatistik</button><button data-go="foretag">Företagsöversikt</button><button data-go="sos">Hjälp & SOS</button>
-      <button id="btn-sources">Datakällor och status</button><button id="btn-legal">Rättspraxis</button><a href="/admin" target="_blank" rel="noopener">Administratör: granskade zoner</a>
+      <button id="btn-sources">Datakällor och status</button><button id="btn-legal">Rättspraxis</button><a href="/community">Användarrapporter</a><a href="/privacy">Integritet</a><a href="/support">Support</a><a href="/admin" target="_blank" rel="noopener">Administratör: granskade zoner</a>
       <button id="btn-theme-toggle" type="button">Byt till mörkt tema</button>
       <button id="btn-glass-toggle" type="button" aria-pressed="false">Prova glasdesign</button>
     </div>
@@ -534,8 +546,8 @@
   <dialog id="sources-dialog">
     <button class="btn-modal-close" id="btn-close-sources" aria-label="Stäng dialog">×</button>
     <div class="eyebrow">DATAKÄLLOR & TRANSPARENS</div>
-    <h2>Vad TryggPuls bygger på</h2>
-    <p>TryggPuls använder uteslutande <strong>offentliga, verifierade och officiella datakällor</strong>. Egna zoner sparas lokalt i din webbläsare. Plats- och ruttsökning skickas till respektive karttjänst.</p>
+    <h2>Vad Cajklops bygger på</h2>
+    <p>Cajklops använder uteslutande <strong>offentliga, verifierade och officiella datakällor</strong>. Egna zoner sparas lokalt i din webbläsare. Plats- och ruttsökning skickas till respektive karttjänst.</p>
 
     <div id="sources-list" class="sources-grid">
       <!-- Fylls dynamiskt från /api/sources -->

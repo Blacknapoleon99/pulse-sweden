@@ -1,11 +1,11 @@
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { authorizeAdmin, adminCapabilities } from './admin-auth.mjs';
 
 const officialHosts = ['polisen.se', 'krisinformation.se', 'smhi.se', 'mcf.se', 'msb.se', 'lansstyrelsen.se'];
 const kinds = new Set(['security-zone', 'organized-crime-area']);
 const states = new Set(['draft', 'review', 'published', 'ended']);
 const maxSecurityZoneDurationMs = 14 * 24 * 60 * 60 * 1000;
-const sha = value => createHash('sha256').update(value).digest();
 const asIsoDate = (value, optional = false) => {
   if (optional && !value) return null;
   const time = Date.parse(value);
@@ -74,7 +74,7 @@ export function createPublicZoneService({ connectionString = process.env.DATABAS
     await query(`CREATE TABLE IF NOT EXISTS public_zones (id text PRIMARY KEY, name text NOT NULL, kind text NOT NULL, source_title text NOT NULL, source_excerpt text NOT NULL, source_url text NOT NULL, source_date timestamptz NOT NULL, valid_from timestamptz NOT NULL, valid_to timestamptz, geometry jsonb NOT NULL, status text NOT NULL CHECK (status IN ('draft','review','published','ended')), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())`);
     await query(`CREATE TABLE IF NOT EXISTS public_zone_audit (id text PRIMARY KEY, zone_id text NOT NULL, action text NOT NULL, actor text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), detail jsonb NOT NULL DEFAULT '{}'::jsonb)`);
   }
-  async function audit(id, action, detail = {}, actor = 'admin-token') {
+  async function audit(id, action, detail = {}, actor = 'system') {
     await query('INSERT INTO public_zone_audit(id,zone_id,action,actor,detail) VALUES($1,$2,$3,$4,$5)', [randomUUID(), id, action, actor, JSON.stringify(detail)]);
   }
   async function endExpired() {
@@ -96,14 +96,14 @@ export function createPublicZoneService({ connectionString = process.env.DATABAS
     const result = await query(`SELECT id,name,kind,source_title AS "sourceTitle",source_excerpt AS "sourceExcerpt",source_url AS "sourceUrl",source_date AS "sourceDate",valid_from AS "validFrom",valid_to AS "validTo",geometry,status,created_at AS "createdAt",updated_at AS "updatedAt" FROM public_zones ORDER BY updated_at DESC LIMIT 200`);
     return result.rows;
   }
-  async function createDraft(input) {
+  async function createDraft(input, actor) {
     const zone = validatePublicZone(input, { now });
     const id = randomUUID();
     await query(`INSERT INTO public_zones(id,name,kind,source_title,source_excerpt,source_url,source_date,valid_from,valid_to,geometry,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'draft')`, [id, zone.name, zone.kind, zone.sourceTitle, zone.sourceExcerpt, zone.sourceUrl, zone.sourceDate, zone.validFrom, zone.validTo, JSON.stringify(zone.geometry)]);
-    await audit(id, 'draft-created', { name: zone.name, kind: zone.kind, sourceUrl: zone.sourceUrl });
+    await audit(id, 'draft-created', { name: zone.name, kind: zone.kind, sourceUrl: zone.sourceUrl }, actor);
     return { id, status: 'draft' };
   }
-  async function transition(id, target) {
+  async function transition(id, target, actor) {
     if (!states.has(target)) throw Object.assign(new Error('Ogiltig status'), { status: 400 });
     const result = await query('SELECT status,valid_from,valid_to FROM public_zones WHERE id=$1', [id]);
     const prior = result.rows[0];
@@ -112,14 +112,8 @@ export function createPublicZoneService({ connectionString = process.env.DATABAS
     if (!allowed[target]?.includes(prior.status)) throw Object.assign(new Error(`Kan inte ändra ${prior.status} till ${target}`), { status: 409 });
     if (target === 'published' && (!prior.valid_to || Date.parse(prior.valid_from) > now() || Date.parse(prior.valid_to) <= now())) throw Object.assign(new Error('Zonen kan inte publiceras utan en giltig start- och sluttid.'), { status: 409 });
     await query('UPDATE public_zones SET status=$1,updated_at=now() WHERE id=$2', [target, id]);
-    await audit(id, target);
+    await audit(id, target, {}, actor);
     return { id, status: target };
-  }
-  function authorized(req) {
-    const token = process.env.ZONE_ADMIN_TOKEN;
-    const supplied = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1];
-    if (!token || !supplied) return false;
-    return timingSafeEqual(sha(token), sha(supplied));
   }
   async function readBody(req) {
     if (req.headers['content-type']?.split(';')[0] !== 'application/json' || req.headers['x-tryggpuls-action'] !== '1') throw Object.assign(new Error('JSON och appens begäran krävs'), { status: 415 });
@@ -135,13 +129,20 @@ export function createPublicZoneService({ connectionString = process.env.DATABAS
       if (!available) return send(503, { error: 'Zonregistret kräver en serverdatabas och är inte konfigurerat i den här miljön', status: 'requires_setup' });
       if (url.pathname === '/api/public-zones' && ['GET', 'HEAD'].includes(req.method)) return send(200, await listPublic());
       if (!url.pathname.startsWith('/api/admin/zones')) return false;
-      if (!authorized(req)) return send(401, { error: 'Administratörsnyckel saknas eller är ogiltig' });
-      if (req.method === 'GET' && url.pathname === '/api/admin/zones') return send(200, { items: await listAdmin(), status: 'ok', fetchedAt: new Date(now()).toISOString(), stale: false });
+      const actor = authorizeAdmin(req);
+      if (!actor) return send(401, { error: 'Administratörsnyckel saknas eller är ogiltig' });
+      if (req.method === 'GET' && url.pathname === '/api/admin/zones') return send(200, { items: await listAdmin(), ...adminCapabilities(actor), status: 'ok', fetchedAt: new Date(now()).toISOString(), stale: false });
       if (req.method !== 'POST') return send(405, { error: 'Metoden stöds inte' });
       const body = await readBody(req);
-      if (url.pathname === '/api/admin/zones') return send(201, await createDraft(body));
+      if (url.pathname === '/api/admin/zones') {
+        if (!adminCapabilities(actor).canCreate) return send(403, { error: 'Din roll får inte skapa zonutkast' });
+        return send(201, await createDraft(body, actor.id));
+      }
       const match = /^\/api\/admin\/zones\/([a-z0-9-]+)\/(review|publish|end)$/.exec(url.pathname);
-      if (match) return send(200, await transition(match[1], ({ review: 'review', publish: 'published', end: 'ended' })[match[2]]));
+      if (match) {
+        if (!adminCapabilities(actor).canReview) return send(403, { error: 'Publicering kräver en granskarroll' });
+        return send(200, await transition(match[1], ({ review: 'review', publish: 'published', end: 'ended' })[match[2]], actor.id));
+      }
       return send(404, { error: 'Administratörsendpointen finns inte' });
     } catch (error) { return send(error.status || 500, { error: error.status ? error.message : 'Zonregistret svarar inte' }); }
   }

@@ -4,14 +4,23 @@ import { feeds, readCrisis, createRequestQueue } from './feeds.mjs';
 import { createFamilyApi } from './family-api.mjs';
 import { readPoliceAreas, policeAreasStatus, sourcePage as policeAreasSource } from './police-areas.mjs';
 import { readZoneNews, zoneNewsStatus } from './police-zone-news.mjs';
+import { pressNews } from './press-news.mjs';
 import { readTraffic, trafficStatus } from './traffic.mjs';
 import { readPoliceStations, policeStationsStatus } from './police-stations.mjs';
 import { readPoliceStationDetails } from './police-stations.mjs';
 import { policeApiFetch } from './police-api.mjs';
 import { createPublicZoneService } from './public-zones.mjs';
+import { createAdminMapItemsService } from './admin-map-items.mjs';
 import { findRouteZonePassages, findGeographicItemsAlongRoute, nearestRoutePosition, pointToRouteDistanceMeters, selectApproximateRouteEvents, routeSlice } from './route-analysis.mjs';
 import { readNearbyShelters, shelterSource, shelterStatus } from './shelters.mjs';
 import { createFireRiskService, sampleRouteForFireRisk, selectFireRiskPeriod, SMHI_FIRE_RISK_URL } from './fire-risk.mjs';
+import { createFoundrySummaryReader } from './foundry-summaries.mjs';
+import { migrate } from './migrations.mjs';
+import { createCommunityService } from './community.mjs';
+import { createAccountApi } from './account.mjs';
+import { createNativeNotifications } from './native-notifications.mjs';
+import { initializeMonitoring, captureServerError } from './monitoring.mjs';
+import { createSourceMonitor } from './source-monitor.mjs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,7 +30,7 @@ const minDistanceToRouteMeters = pointToRouteDistanceMeters;
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 // Local secrets are ignored by Git. Hosting environments supply the same variables.
-try { process.loadEnvFile?.(path.join(root, '.env.local')); }
+try { if (process.env.TRYGGPULS_LOAD_ENVFILE !== 'false') process.loadEnvFile?.(path.join(root, '.env.local')); }
 catch (err) { if (err.code !== 'ENOENT') throw err; }
 const refreshIntervalMs = 75_000;
 const upstream = 'https://polisen.se/api/events';
@@ -40,12 +49,23 @@ if (!process.env.DATABASE_URL && process.env.NODE_ENV !== 'production') {
   const { newDb } = await import('pg-mem');
   const adapter = newDb().adapters.createPg();
   localFamilyPool = new adapter.Pool();
+  localFamilyPool.__memory = true;
 }
 const familyApi = createFamilyApi(localFamilyPool ? { pool: localFamilyPool } : {});
 const publicZoneApi = createPublicZoneService(localFamilyPool ? { pool: localFamilyPool } : {});
+const adminMapItemsApi = createAdminMapItemsService(localFamilyPool ? { pool: localFamilyPool } : {});
 const fireRiskService = createFireRiskService();
+const foundrySummaryReader = createFoundrySummaryReader();
 const routeCache = createRouteCache();
 export const familyService = familyApi.service;
+initializeMonitoring();
+const nativeNotifications = createNativeNotifications({ pool: familyService.pool });
+const communityApi = createCommunityService({ pool: familyService.pool, accounts: familyService, notifications: nativeNotifications });
+const accountApi = createAccountApi({ pool: familyService.pool, accounts: familyService, community: communityApi, notifications: nativeNotifications });
+const checkSourceHealth=createSourceMonitor({pool:familyService.pool,mailer:accountApi.mailer,statuses:sourceStatuses});
+familyService.addAccountCleanup(communityApi.cleanupAccount);
+familyService.addAlarmHook(nativeNotifications.alarmHook);
+let platformReady = false;
 let familyDbReady = false;
 let publicZoneDbReady = false;
 
@@ -88,8 +108,9 @@ async function upstreamFetch(url, timeoutMs, extraHeaders = {}) {
   return response;
 }
 
-// Officiella datakällor (publiceras via /api/sources)
+// Datakällor (publiceras via /api/sources)
 const publicSources = [
+  { id: 'press-news', name: 'Aftonbladet och Expressen – nyheter', provider: 'Aftonbladet / Expressen', scope: 'Nationella nyhetsrubriker och artikelbilder från utgivarnas RSS', refresh: 'Var 5:e minut när tjänsten används', detail: 'Separat från myndighetsnotiser och kartans händelser. Artiklar länkar till originalkällan; bilder visas bara när utgivaren inkluderar dem i flödet.', url: 'https://www.aftonbladet.se/nyheter/rss.xml' },
   { id: 'polisen-areas', name: 'Polisens lägesbild över utsatta områden', provider: 'Polismyndigheten', scope: 'Publicerade områdesgränser, inte pågående brott', refresh: 'Senaste publicerade nationella lägesbild; kontrollera källan för nya utgåvor', detail: 'Visar Polisens officiella GeoJSON för senaste publicerade nationella lägesbild. Bedömningen är periodisk och visar inte var rekrytering pågår just nu.', url: policeAreasSource },
   { id: 'polisen-zone-news', name: 'Polisens nyheter om säkerhetszoner', provider: 'Polismyndigheten', scope: 'Nyligen publicerade artiklar, inte verifierade aktiva zoner', refresh: 'Var 30:e minut när tjänsten används', detail: 'Filtrerar Polisens officiella nyhets- och press-RSS efter säkerhetszoner. Rubriker är inga geodata eller bevis för att ett beslut fortfarande gäller.', url: 'https://polisen.se/aktuellt/rss/' },
   { id: 'weather', name: 'SMHI – varningar och meddelanden', provider: 'SMHI', scope: 'Väder, vatten och regionala varningar', refresh: 'Var 65:e sekund', detail: 'Varningsnivå, område, giltighet och råd från SMHI. Innehållet återges med källhänvisning.', url: 'https://www.smhi.se/vader/prognoser-och-varningar/varningar-och-meddelanden' },
@@ -738,6 +759,17 @@ async function analyzeRoute(primaryRoute, mode, bufferMeters, routeId) {
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
+  if (url.pathname === '/api/community-reports' || url.pathname.startsWith('/api/community-reports/') || url.pathname.startsWith('/api/community/') || url.pathname.startsWith('/api/admin/community') || url.pathname === '/api/account' || url.pathname.startsWith('/api/account/')) {
+    if (!platformReady && familyService.available) await initializeFamily();
+    if (!platformReady && familyService.available) return json(req,res,503,{error:'Databasen startar fortfarande'});
+    return url.pathname.startsWith('/api/account') ? accountApi.handle(req,res,url) : communityApi.handle(req,res,url);
+  }
+
+  if (url.pathname === '/api/public-map-items' || url.pathname.startsWith('/api/admin/map-items')) {
+    if (!publicZoneDbReady && adminMapItemsApi.available) return json(req, res, 503, { error: 'Kartpostregistret startar fortfarande' });
+    return adminMapItemsApi.handle(req, res, url);
+  }
+
   if (url.pathname === '/api/public-zones' || url.pathname.startsWith('/api/admin/zones')) {
     if (!publicZoneDbReady && publicZoneApi.available) return json(req, res, 503, { error: 'Zonregistret startar fortfarande' });
     return publicZoneApi.handle(req, res, url);
@@ -774,6 +806,15 @@ export const server = http.createServer(async (req, res) => {
         return json(req, res, 502, { error: 'Kartbakgrunden kunde inte hämtas' });
       }
     }
+    if(url.pathname==='/.well-known/apple-app-site-association')return json(req,res,200,{applinks:{details:process.env.IOS_APP_ID?[{appIDs:[process.env.IOS_APP_ID],components:[{'/':'/account','comment':'Account verification and recovery'}]}]:[]}});
+    if(url.pathname==='/.well-known/assetlinks.json'){
+      let fingerprints=[];try{fingerprints=JSON.parse(process.env.ANDROID_SHA256_FINGERPRINTS_JSON||'[]').filter(value=>/^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(value));}catch{}
+      return json(req,res,200,process.env.ANDROID_PACKAGE&&fingerprints.length?[{relation:['delegate_permission/common.handle_all_urls'],target:{namespace:'android_app',package_name:process.env.ANDROID_PACKAGE,sha256_cert_fingerprints:fingerprints}}]:[]);
+    }
+    if (url.pathname === '/api/ready') {
+      let database=false;try{if(platformReady){await familyService.query('SELECT 1');database=true;}}catch{}
+      return json(req,res,database?200:503,{status:database?'ready':'unavailable',database});
+    }
     if (url.pathname === '/api/health') {
       return json(req, res, 200, {
         status: 'ok',
@@ -782,9 +823,36 @@ export const server = http.createServer(async (req, res) => {
         version: '2.0.1',
         uptime: process.uptime(),
         familyConfigured: familyDbReady && familyApi.service.available,
+        communityConfigured: platformReady && communityApi.available,
+        communityPublishingEnabled: accountApi.config().publishingEnabled,
+        nativePushConfigured: nativeNotifications.configured,
         pushConfigured: familyApi.service.pushEnabled,
         noMockDataGuarantee: true
       });
+    }
+
+    if (url.pathname === '/api/alert-summaries') {
+      const foundryStatus = foundrySummaryReader.status();
+      if (!foundryStatus.configured || !foundryStatus.enabled) {
+        return json(req, res, 503, { items: [], error: 'Foundry-sammanfattningar är inte aktiverade', code: 'FOUNDRY_SUMMARIES_DISABLED' });
+      }
+
+      const source = await feeds.weather.read();
+      if (source.status !== 'ok' || !source.fetchedAt) {
+        return json(req, res, 503, { items: [], error: 'SMHI:s aktuella källdata kan inte verifieras', code: 'SMHI_SOURCE_NOT_FRESH' });
+      }
+
+      const summaries = await foundrySummaryReader.readApprovedSummaries();
+      if (summaries.status !== 'ok') {
+        return json(req, res, 503, { items: [], error: 'Godkända Foundry-sammanfattningar kan inte hämtas', code: summaries.code || 'FOUNDRY_UNAVAILABLE' });
+      }
+
+      const items = (await Promise.all(source.items.map((record) => foundrySummaryReader.findForSourceRecord(record))))
+        .filter(Boolean)
+        .map(({ sourceId, contentVersion, summarySv, sourceUrl, sourceUpdatedAt, sourceFetchedAt, generatedAt, modelVersion, reviewStatus }) => ({
+          sourceId, contentVersion, summarySv, sourceUrl, sourceUpdatedAt, sourceFetchedAt, generatedAt, modelVersion, reviewStatus
+        }));
+      return json(req, res, 200, { items, sourceFetchedAt: source.fetchedAt, foundryFetchedAt: summaries.fetchedAt });
     }
 
     if (url.pathname === '/api/sources') {
@@ -794,6 +862,10 @@ export const server = http.createServer(async (req, res) => {
       });
     }
 
+    if (url.pathname === '/api/press-news') {
+      const result = await pressNews.read();
+      return json(req, res, result.fetchedAt ? 200 : 503, result);
+    }
     const extraFeeds = { '/api/weather-warnings': 'weather', '/api/crisis-news': 'news', '/api/preparedness': 'preparedness' };
     if (extraFeeds[url.pathname]) {
       const result = await feeds[extraFeeds[url.pathname]].read();
@@ -950,8 +1022,8 @@ export const server = http.createServer(async (req, res) => {
     }
 
     // Static File Serving
-    let filePath = url.pathname === '/' ? 'index.html' : url.pathname === '/admin' ? 'admin.html' : url.pathname.slice(1);
-    const publicFiles = ['index.html', 'app.js', 'route-follow.js', 'family-client.js', 'family-sw.js', 'style.css', 'admin.html', 'admin.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', ...['layers.png', 'layers-2x.png', 'marker-icon.png', 'marker-icon-2x.png', 'marker-shadow.png'].map(name => 'vendor/leaflet/images/' + name)];
+    let filePath = url.pathname === '/' ? 'index.html' : url.pathname === '/admin' ? 'admin.html' : ['/account','/support','/privacy','/community-rules','/account-deletion','/community'].includes(url.pathname) ? 'community.html' : url.pathname.slice(1);
+    const publicFiles = ['cajklops-opening.js', 'cajklops-opening.css', 'assets/cajklops-opening.mp4', 'assets/cajklops-everyday.mp4', 'assets/cajklops-poster.png', 'assets/cajklops-icon.png', 'index.html', 'app.js', 'route-follow.js', 'family-client.js', 'family-sw.js', 'style.css', 'admin.html', 'admin.js', 'community.html', 'community-web.js', 'community.css', 'appearance.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', 'vendor/proj4/proj4.js', ...['layers.png', 'layers-2x.png', 'marker-icon.png', 'marker-icon-2x.png', 'marker-shadow.png'].map(name => 'vendor/leaflet/images/' + name)];
     if (!publicFiles.includes(filePath)) return json(req, res, 404, { error: 'Sidan kunde inte hittas' });
     const safePath = path.normalize(path.join(root, filePath));
     if (!safePath.startsWith(root)) {
@@ -969,9 +1041,25 @@ export const server = http.createServer(async (req, res) => {
       else if (safePath.endsWith('.webmanifest')) mimeType = 'application/manifest+json; charset=utf-8';
       else if (safePath.endsWith('.svg')) mimeType = 'image/svg+xml';
       else if (safePath.endsWith('.png')) mimeType = 'image/png';
+      else if (safePath.endsWith('.mp4')) mimeType = 'video/mp4';
       else if (safePath.endsWith('.jpg') || safePath.endsWith('.jpeg')) mimeType = 'image/jpeg';
 
-      res.writeHead(200, headers(mimeType, 'no-cache'));
+      if (mimeType === 'video/mp4' && req.headers.range) {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+        const size = content.length;
+        const suffix = match && !match[1];
+        const start = match ? (suffix ? Math.max(0, size - Number(match[2])) : Number(match[1])) : -1;
+        const end = match ? (suffix || !match[2] ? size - 1 : Math.min(Number(match[2]), size - 1)) : -1;
+        if (!match || (!match[1] && !match[2]) || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= size || end < start) {
+          res.writeHead(416, { ...headers(mimeType), 'Content-Range': `bytes */${size}` });
+          return res.end();
+        }
+        res.writeHead(206, { ...headers(mimeType, 'no-cache'), 'Accept-Ranges': 'bytes',
+          'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
+        return res.end(req.method === 'HEAD' ? undefined : content.subarray(start, end + 1));
+      }
+      res.writeHead(200, { ...headers(mimeType, 'no-cache'), 'Content-Length': content.length,
+        ...(mimeType === 'video/mp4' ? { 'Accept-Ranges': 'bytes' } : {}) });
       res.end(req.method === 'HEAD' ? undefined : content);
     } catch (err) {
       res.writeHead(404, headers('text/plain; charset=utf-8'));
@@ -981,6 +1069,7 @@ export const server = http.createServer(async (req, res) => {
     // Safety-net: oväntat fel får aldrig krascha servern (async-handler utan
     // middleware-catch — fånga allting centralt)
     console.error('[server] Oväntat fel:', err);
+    captureServerError(err);
     if (!res.headersSent) {
       return json(req, res, 500, { error: 'Internt serversfel' });
     }
@@ -988,10 +1077,15 @@ export const server = http.createServer(async (req, res) => {
   }
 });
 
-async function initializeFamily() {
+let initializePending;
+export async function initializeFamily() {
   if (!familyApi.service.available) return;
-  try { await Promise.all([familyApi.service.init(), publicZoneApi.init()]); familyDbReady = true; publicZoneDbReady = true; }
-  catch (err) { console.error('[family] Databasen svarar inte:',err.message); }
+  if (initializePending) return initializePending;
+  initializePending = (async () => {
+    try { await familyApi.init(); await migrate(familyService.pool); await Promise.all([publicZoneApi.init(), adminMapItemsApi.init()]); familyDbReady = true; publicZoneDbReady = true; platformReady = true; }
+    catch (err) { console.error('[family] Databasen svarar inte:',err.message); captureServerError(err); }
+  })().finally(() => { initializePending = null; });
+  return initializePending;
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   initializeFamily().finally(() => server.listen(port, host, () => console.log(`TryggPuls startad: http://localhost:${server.address().port} (lyssnar på ${host})`)));
@@ -1009,6 +1103,27 @@ setInterval(async () => {
   catch (err) { console.error('[family] Bakgrundskontroll misslyckades:',err.message); }
   finally { familySweepPending = false; }
 },65_000).unref();
+
+let platformSweepPending = false;
+let sourceHealthCheckedAt=0;
+setInterval(async () => {
+  if (platformSweepPending || !platformReady) return;
+  platformSweepPending = true;
+  try { await communityApi.sweep(); await nativeNotifications.dispatch(); await checkModerationAlerts();if(Date.now()-sourceHealthCheckedAt>=300_000){await checkSourceHealth();sourceHealthCheckedAt=Date.now();} }
+  catch (error) { captureServerError(error); console.error('[community] Bakgrundskontroll misslyckades'); }
+  finally { platformSweepPending = false; }
+},10_000).unref();
+
+async function checkModerationAlerts() {
+  const email = process.env.MODERATION_EMAIL;
+  if (!email || !accountApi.mailer.configured) return;
+  const queue = await communityApi.moderationQueue();
+  if (!queue.photos.length && !queue.flags.length) return;
+  const last = (await familyService.query('SELECT last_sent_at FROM operation_alerts WHERE alert_key=$1',['moderation'])).rows[0];
+  if (last && Date.now()-new Date(last.last_sent_at).getTime()<3_600_000) return;
+  await accountApi.mailer.send(email,'TryggPuls: innehåll väntar på granskning',`${queue.photos.length} bilder och ${queue.flags.length} anmälningar väntar. Öppna administrationsverktyget. Kontrollera personuppgifter och kränkande innehåll före publicering.`);
+  await familyService.query('INSERT INTO operation_alerts(alert_key,last_sent_at) VALUES($1,$2) ON CONFLICT(alert_key) DO UPDATE SET last_sent_at=$2',['moderation',new Date().toISOString()]);
+}
 
 // Graceful shutdown – låter pågående förfrågningar avslutas innan processen dör.
 function shutdown(signal) {
@@ -1040,6 +1155,7 @@ function sourceStatuses() {
     'bra-stat': observed(braCache, braError),
     'polisen-areas': policeAreasStatus(),
     'polisen-zone-news': zoneNewsStatus(),
+    'press-news': { status: pressNews.snapshot().status, fetchedAt: pressNews.snapshot().fetchedAt },
     'krisinformation-v3': { status: crisisStates.some(s => s.error) ? 'stale' : crisisStates.every(s => s.fetchedAt) ? 'ok' : 'not_checked', fetchedAt: crisisStates.map(s => s.fetchedAt).filter(Boolean).sort()[0] || null },
     'krisinformation-vmas': observed(feeds.vmas.snapshot().fetchedAt ? feeds.vmas.snapshot() : null, feeds.vmas.snapshot().error),
     'krisinformation-notices': observed(feeds.notices.snapshot().fetchedAt ? feeds.notices.snapshot() : null, feeds.notices.snapshot().error),

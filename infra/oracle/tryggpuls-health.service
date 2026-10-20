@@ -1,0 +1,16 @@
+[Unit]
+Description=TryggPuls readiness, disk and backup freshness check
+After=network-online.target tryggpuls.service
+
+[Service]
+Type=oneshot
+User=tryggpuls
+Group=tryggpuls
+WorkingDirectory=/opt/tryggpuls/current
+ExecStart=/usr/local/bin/node scripts/cloud-health.mjs
+TimeoutStartSec=30
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tryggpuls

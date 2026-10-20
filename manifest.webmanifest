@@ -1,15 +1,14 @@
 {
   "id": "/",
-  "name": "TryggPuls",
-  "short_name": "TryggPuls",
+  "name": "Cajklops",
+  "short_name": "Cajklops",
   "description": "Myndighetsinformation, familjezoner och frivilliga platsvarningar.",
   "start_url": "/#karta",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#101820",
-  "theme_color": "#101820",
+  "background_color": "#080d0c",
+  "theme_color": "#080d0c",
   "icons": [
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/assets/cajklops-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" }
   ]
 }

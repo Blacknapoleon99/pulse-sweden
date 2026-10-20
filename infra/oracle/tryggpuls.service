@@ -1,0 +1,29 @@
+[Unit]
+Description=TryggPuls API and background jobs
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=tryggpuls
+Group=tryggpuls
+WorkingDirectory=/opt/tryggpuls/current
+EnvironmentFile=/etc/tryggpuls/app.env
+ExecStart=/usr/local/bin/node server.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tryggpuls
+SyslogIdentifier=tryggpuls
+
+[Install]
+WantedBy=multi-user.target

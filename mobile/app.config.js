@@ -1,0 +1,14 @@
+const releaseProfiles=new Set(['preview','production']);
+module.exports=({config})=>{
+  const env=process.env,profile=env.EAS_BUILD_PROFILE||'development',release=releaseProfiles.has(profile);
+  const required=['EXPO_PUBLIC_API_BASE_URL','APP_IOS_BUNDLE_IDENTIFIER','APP_ANDROID_PACKAGE','EAS_PROJECT_ID','APP_LINK_HOST','GOOGLE_MAPS_ANDROID_API_KEY'];
+  if(release&&env.EXPO_PUBLIC_SENTRY_DSN)required.push('SENTRY_ORG','SENTRY_PROJECT');
+  if(release){const missing=required.filter(key=>!env[key]);if(missing.length)throw new Error(`Release configuration missing: ${missing.join(', ')}`);if(!env.EXPO_PUBLIC_API_BASE_URL.startsWith('https://'))throw new Error('Release API must use HTTPS');}
+  const host=env.APP_LINK_HOST;
+  return {...config,name:'Trygg-Puls',slug:env.EXPO_SLUG||'tryggpuls',version:'2.1.0',scheme:env.APP_SCHEME||'tryggpuls',icon:'./assets/trygg-puls-icon.png',description:'Svensk trygghetsinformation, familj och obekräftade användarobservationer.',
+    ios:{...config.ios,supportsTablet:true,bundleIdentifier:env.APP_IOS_BUNDLE_IDENTIFIER||'se.tryggpuls.development',buildNumber:'1',...(host?{associatedDomains:[`applinks:${host}`]}:{}),infoPlist:{...config.ios?.infoPlist,ITSAppUsesNonExemptEncryption:false}},
+    android:{...config.android,package:env.APP_ANDROID_PACKAGE||'se.tryggpuls.development',versionCode:1,predictiveBackGestureEnabled:true,adaptiveIcon:{foregroundImage:'./assets/trygg-puls-foreground.png',backgroundColor:'#F8FAFD'},...(env.GOOGLE_SERVICES_JSON?{googleServicesFile:env.GOOGLE_SERVICES_JSON}:{}),...(host?{intentFilters:[{action:'VIEW',autoVerify:true,data:[{scheme:'https',host,pathPrefix:'/account'}],category:['BROWSABLE','DEFAULT']}]}:{})},
+    plugins:['expo-asset','expo-video','@react-native-community/datetimepicker',['expo-font',{}],['expo-location',{locationWhenInUsePermission:'Cajklops använder din plats i förgrunden när du väljer information nära dig eller delar plats med familjen.',locationAlwaysAndWhenInUsePermission:'TryggPulse delar din plats med familjen i bakgrunden bara när du själv aktiverar det. Du kan stoppa delningen när som helst.',isIosBackgroundLocationEnabled:true,isAndroidBackgroundLocationEnabled:true,isAndroidForegroundServiceEnabled:true}],'expo-secure-store',['expo-image-picker',{photosPermission:'Välj en bild till din rapport. Bilden visas först efter personalens granskning.',cameraPermission:false,microphonePermission:false}],['expo-notifications',{enableBackgroundRemoteNotifications:false}],['expo-splash-screen',{image:'./assets/trygg-puls-foreground.png',imageWidth:220,resizeMode:'contain',backgroundColor:'#F8FAFD'}],['react-native-maps',{androidGoogleMapsApiKey:env.GOOGLE_MAPS_ANDROID_API_KEY}],...(env.EXPO_PUBLIC_SENTRY_DSN?[['@sentry/react-native',{organization:env.SENTRY_ORG,project:env.SENTRY_PROJECT}]]:[])],
+    extra:{...config.extra,appLinkHost:host,...(env.EAS_PROJECT_ID?{eas:{projectId:env.EAS_PROJECT_ID}}:{})}
+  };
+};

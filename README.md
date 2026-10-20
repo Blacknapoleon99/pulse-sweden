@@ -5,9 +5,9 @@
 
 TryggPuls visar publicerade myndighetsuppgifter, historisk statistik och öppna kartdata för Sverige. Polisnotiser är ett urval; kartpunkter är ofta områdescentrum. En tom lista är ingen trygghetsgaranti. Företagsvyn innehåller tydligt märkta exempelarbetsplatser.
 
-## Expo Go-prototyp
+## Mobilapp och community release
 
-En fristående mobil demo för Expo SDK 57 finns i [`mobile/`](mobile/README.md). Starta den med `cd mobile`, `npm ci` och `npm start`. Den använder webbserverns API:er och visar karta, polisnotiser, ruttanalys och familjefunktioner i ett native gränssnitt. Bakgrundsposition ingår inte i Expo Go-demon.
+Expo SDK 57-appen i [`mobile/`](mobile/README.md) har native navigation, automatiska nyhets-/rapporthöjdpunkter, konton och communityrapporter. Rapporter är alltid **Obekräftad användarrapport**, med ungefärlig plats och 24 timmars livslängd. Bilder kräver personalens godkännande. Starta med `npm ci --include=dev` och `npm start`. Se [releasekrav och drift](docs/mobile-release.md) och [community-API](docs/community-api.md). Publik publicering är avstängd tills ägaren aktiverar en bemannad lansering. Riktiga signerade byggen och enhetstester krävs före butikslansering.
 
 ## API och drift (uppdaterat 2026-09-24)
 
@@ -34,12 +34,14 @@ Publika informationsendpoints stöder GET och HEAD. Informationsflöden anger `f
 | `/api/route-refresh?routeId=...` | Hämtar aktuell källinformation för den redan beräknade rutten utan att skapa en ny vägsträckning |
 | `/api/public-zones` | Aktiva, manuellt granskade myndighetszoner med ordagrant källutdrag, källa, beslutstid och giltighetsperiod; publikt endast efter granskning och publicering |
 | `/api/admin/zones` | Token-skyddad hantering av utkast, granskning och publicering av myndighetszoner |
+| `/api/public-map-items` | Aktiva, tidsbegränsade punktmarkörer med myndighetskälla; märkta som TryggPuls-granskade, inte officiella varningar |
+| `/api/admin/map-items` | Token-skyddad hantering av markörutkast, granskning, publicering och avslut |
 | `/api/map-config` | Vald kartleverantör, utan API-nyckel |
 | `/api/map-tiles/{z}/{x}/{y}.png` | CARTO Voyager via servern, zoom 0–19; kräver konfigurerad nyckel |
 | `/api/sources` | Källförteckning med observerad status, tidsstämpel och källänk |
 | `/api/health` | Serverns tillgänglighet (inte en garanti att alla externa källor svarar) |
 
-Familje-API: `GET /api/family/config`, `GET /api/family/me` och `POST /api/family/{register,login,logout,group,invite,join,zones,child-items,location,police-area-alerts,stop,leave,push}`. Zoner, AirTag-referenser (`DELETE /api/family/child-items/{id}`), push-prenumerationer och det egna kontot kan raderas med `DELETE`. Ändringar kräver JSON, `X-TryggPuls-Action: 1`, samma ursprung och, förutom registrering/inloggning, en httpOnly sessionscookie eller en native bearer-session. Inbjudningar gäller en gång i 24 timmar. Endast familjens skapare kan ändra delade zoner och AirTag-referenser. Varje medlem aktiverar själv GPS på sin enhet.
+Familje-API: `GET /api/family/config`, `GET /api/family/me`, `POST /api/family/{register,login,logout,group,invite,join,zones,child-items,location,police-area-alerts,stop,leave,push}` samt `GET /api/family/bankid/config` och `POST /api/family/bankid/{start,collect}`. BankID är avstängt tills RP-certifikat, avtal och hemligheter finns på servern. Nya BankID-konton skapas efter lyckad identifiering och kan använda familjefunktionerna utan e-post; BankID-personnummer sparas inte, bara en HMAC-identifierare. Befintliga lösenordskonton länkas inte automatiskt. Zoner, AirTag-referenser (`DELETE /api/family/child-items/{id}`), push-prenumerationer och det egna kontot kan raderas med `DELETE`. Ändringar kräver JSON, `X-TryggPuls-Action: 1`, samma ursprung och, förutom registrering/inloggning, en httpOnly sessionscookie eller en native bearer-session. Inbjudningar gäller en gång i 24 timmar. Endast familjens skapare kan ändra delade zoner och AirTag-referenser. Varje medlem aktiverar själv GPS på sin enhet.
 
 Familjen kan spara barnets namn och namnet på en AirTag som sitter på en tillhörighet. Det är en referens för att hitta föremålet i Apples Hitta-app, inte en AirTag-integration eller en position i TryggPuls. Barnet behöver inte en telefon eller internetanslutning, men platsen uppdateras bara när AirTagen upptäcks av [Apples Hitta-nätverk](https://support.apple.com/guide/iphone/locate-an-item-ipha779f0c10/ios). Apple avser AirTag för föremål, [inte för att spåra personer](https://www.apple.com/newsroom/2022/02/an-update-on-airtag-and-unwanted-tracking/). TryggPuls får ingen platsdata från AirTag och kan därför inte använda den för kartan, zonvarningar eller nödlarm. En GPS-enhet med egen uppkoppling och ett dokumenterat API skulle krävas för sådan automatisk funktion.
 
@@ -54,6 +56,8 @@ Kopiera `.env.example` till `.env.local` för lokal körning. Filen är Git-igno
 - `CARTO_BASEMAP_API_KEY`: valfri kartnyckel. Den stannar på servern. Utan nyckel används OpenStreetMap; vid CARTO-fel byter kartan till OpenStreetMap.
 - `TRAFIKVERKET_API_KEY`: separat nyckel från Trafikverket för att visa publicerade väg- och järnvägsstörningar. Utan nyckeln markeras källan som `requires_key`.
 - `ZONE_ADMIN_TOKEN`: skyddar administrationen av granskade myndighetszoner. Lagra den som Render-hemlighet och dela den inte med klienten.
+- `ZONE_ADMIN_TOKENS_JSON`: valfria individuella admin-nycklar med rollerna `editor`, `reviewer` eller `admin`. Editors skapar utkast; reviewers publicerar; auditloggen registrerar staff-ID. Den äldre `ZONE_ADMIN_TOKEN` ger fortfarande full åtkomst och bör tas bort när rollbaserade nycklar används.
+- `BANKID_ENV`, `BANKID_CERT_PATH`, `BANKID_CERT_PASSPHRASE`, `BANKID_CA_CERT_PATH`, `BANKID_USER_HASH_KEY`, `BANKID_TRUST_PROXY`, `BANKID_RETURN_URL`: BankID RP API v6.0 körs bara server-side. Använd PFX/RP-certifikat från avtalspart och en slumpmässig hashnyckel som hålls hemlig. Se [BankID-, säkerhets- och Foundry-anteckningar](docs/admin-safety-bankid.md).
 - `DATABASE_URL`: PostgreSQL krävs för familjekonton i produktion. Utan variabel används en tillfällig databas i lokal utveckling. Utan databas i produktion svarar familje-API med 503.
 - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`: behövs för Web Push. Skapa ett nyckelpar en gång och bevara det mellan distributioner, annars behöver användarna prenumerera på nytt.
 - `GEOCODER_BASE_URL`, `WALKING_ROUTER_URL`, `DRIVING_ROUTER_URL`: byt karttjänster utan kodändring.
@@ -87,17 +91,22 @@ Brå uppger att myndigheten inte har ett publikt API för öppna data. Därför 
 
 ## Användning
 
+En repo-baserad bedömning av möjliga användningar för Palantir Foundry AIP, rekommenderad pilot, GPU-frågor och teknisk integrationsdesign finns i [`docs/palantir-foundry-aip-assessment.md`](docs/palantir-foundry-aip-assessment.md).
+
+En valfri, skrivskyddad Foundry-anslutning är förberedd i [`foundry-summaries.mjs`](foundry-summaries.mjs). Server-endpointen `/api/alert-summaries` kan bara lämna ut färska SMHI-sammanfattningar som är markerade `approved` och vars källversion matchar den aktuella varningen. Den är avstängd tills en separat granskningsdataset och serverbaserad OAuth-inloggning har konfigurerats. De befintliga flödena fortsätter fungera som reserv.
+
 - Händelser: fritext, plats, tidsintervall, kategori och återställning av filter.
 - Väder & råd: sökbara varningar, krisnyheter och beredskapsguider med originalkällor.
 - Ruttanalys: sök start/mål, välj ett sökresultat och beräkna gång- eller bilväg. Separata avsnitt visar Polisens områdesbedömningar, aktiva publicerade säkerhetszoner, manuellt granskade uppgifter om nätverksområden, trafik, väder och historiska polisnotiser som berör rutten. Välj "Följ resan med GPS" för positionsvisning och källuppdatering var 60:e sekund medan sidan är öppen.
 - Skyddszoner: skapa och radera egna platser som sparas lokalt.
+- Administrationsverktyg: skapa källbelagda kartmarkörer i appen eller på `/admin`; utkast måste granskas och publiceras och försvinner automatiskt vid slutdatum.
 - Statistik: välj kommun för BRÅ:s historiska statistik.
 - SOS: telefonlänkar, position och användarstyrd delning.
 - Flikar stöder tangentbord, direktlänkar och webbläsarens tillbaka-knapp. Mobilens fasta huvudflikar håller karta och innehåll nära till hands; kartlager och återställning finns samlade under "Kartlager".
 
 ## Kör lokalt
 
-Node.js 22 rekommenderas. Kör `npm install` först.
+Node.js 24 används för produktion och CI. Kör `npm install --include=dev` först.
 
 ```sh
 npm install
