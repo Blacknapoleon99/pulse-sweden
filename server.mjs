@@ -4,6 +4,7 @@ import { feeds, readCrisis, createRequestQueue } from './feeds.mjs';
 import { createFamilyApi } from './family-api.mjs';
 import { readPoliceAreas, policeAreasStatus, sourcePage as policeAreasSource } from './police-areas.mjs';
 import { readZoneNews, zoneNewsStatus } from './police-zone-news.mjs';
+import { pressNews } from './press-news.mjs';
 import { readTraffic, trafficStatus } from './traffic.mjs';
 import { readPoliceStations, policeStationsStatus } from './police-stations.mjs';
 import { readPoliceStationDetails } from './police-stations.mjs';
@@ -90,6 +91,7 @@ async function upstreamFetch(url, timeoutMs, extraHeaders = {}) {
 
 // Officiella datakällor (publiceras via /api/sources)
 const publicSources = [
+  { id: 'press-news', name: 'Aftonbladet och Expressen – nyheter', provider: 'Aftonbladet / Expressen', scope: 'Nationella nyhetsrubriker och artikelbilder från utgivarnas RSS', refresh: 'Var 5:e minut när tjänsten används', detail: 'Separat från myndighetsnotiser och kartans händelser. Artiklar länkar till originalkällan; bilder visas bara när utgivaren inkluderar dem i flödet.', url: 'https://www.aftonbladet.se/nyheter/rss.xml' },
   { id: 'polisen-areas', name: 'Polisens lägesbild över utsatta områden', provider: 'Polismyndigheten', scope: 'Publicerade områdesgränser, inte pågående brott', refresh: 'Senaste publicerade nationella lägesbild; kontrollera källan för nya utgåvor', detail: 'Visar Polisens officiella GeoJSON för senaste publicerade nationella lägesbild. Bedömningen är periodisk och visar inte var rekrytering pågår just nu.', url: policeAreasSource },
   { id: 'polisen-zone-news', name: 'Polisens nyheter om säkerhetszoner', provider: 'Polismyndigheten', scope: 'Nyligen publicerade artiklar, inte verifierade aktiva zoner', refresh: 'Var 30:e minut när tjänsten används', detail: 'Filtrerar Polisens officiella nyhets- och press-RSS efter säkerhetszoner. Rubriker är inga geodata eller bevis för att ett beslut fortfarande gäller.', url: 'https://polisen.se/aktuellt/rss/' },
   { id: 'weather', name: 'SMHI – varningar och meddelanden', provider: 'SMHI', scope: 'Väder, vatten och regionala varningar', refresh: 'Var 65:e sekund', detail: 'Varningsnivå, område, giltighet och råd från SMHI. Innehållet återges med källhänvisning.', url: 'https://www.smhi.se/vader/prognoser-och-varningar/varningar-och-meddelanden' },
@@ -794,6 +796,10 @@ export const server = http.createServer(async (req, res) => {
       });
     }
 
+    if (url.pathname === '/api/press-news') {
+      const result = await pressNews.read();
+      return json(req, res, result.fetchedAt ? 200 : 503, result);
+    }
     const extraFeeds = { '/api/weather-warnings': 'weather', '/api/crisis-news': 'news', '/api/preparedness': 'preparedness' };
     if (extraFeeds[url.pathname]) {
       const result = await feeds[extraFeeds[url.pathname]].read();
@@ -1040,6 +1046,7 @@ function sourceStatuses() {
     'bra-stat': observed(braCache, braError),
     'polisen-areas': policeAreasStatus(),
     'polisen-zone-news': zoneNewsStatus(),
+    'press-news': { status: pressNews.snapshot().status, fetchedAt: pressNews.snapshot().fetchedAt },
     'krisinformation-v3': { status: crisisStates.some(s => s.error) ? 'stale' : crisisStates.every(s => s.fetchedAt) ? 'ok' : 'not_checked', fetchedAt: crisisStates.map(s => s.fetchedAt).filter(Boolean).sort()[0] || null },
     'krisinformation-vmas': observed(feeds.vmas.snapshot().fetchedAt ? feeds.vmas.snapshot() : null, feeds.vmas.snapshot().error),
     'krisinformation-notices': observed(feeds.notices.snapshot().fetchedAt ? feeds.notices.snapshot() : null, feeds.notices.snapshot().error),
