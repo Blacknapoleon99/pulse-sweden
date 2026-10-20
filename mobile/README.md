@@ -44,8 +44,6 @@ GPS remains foreground-only for this release. Native notifications for family al
 
 The family screen can save up to five AirTag names for a child's belongings on this phone and explains how to find each item in Apple's Find My app. These names stay on this phone and are not shared with other family members. The app cannot read AirTag locations or trigger TryggPuls geofence alerts from them.
 
-The family screen can save an AirTag name for a child's belongings and explains how to find the item in Apple's Find My app. It cannot read AirTag locations or trigger TryggPuls geofence alerts from them.
-
 ## Checks
 
 Run `npx tsc --noEmit` and `npx expo export --platform android --platform ios` from `mobile/`.
